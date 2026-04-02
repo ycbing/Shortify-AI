@@ -42,5 +42,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
-- uploads/
+# uploads (generated files)
+uploads/
 - drizzle/
