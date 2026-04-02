@@ -48,16 +48,13 @@ export async function POST(request: NextRequest) {
 
       const imageUrl = await generateImage(sceneDescription, drama[0].style || "realistic");
 
-      // Download and save image
-      const savePath = path.join(uploadDir, "images", `${dramaId}`, `episode-${episode.episodeNumber}.png`);
-      const localPath = await downloadImage(imageUrl, savePath);
-
+      // 直接使用 CogView 返回的远程 URL
       await db
         .update(episodes)
-        .set({ imageUrl: localPath })
+        .set({ imageUrl })
         .where(eq(episodes.id, episodeId));
 
-      return NextResponse.json({ episodeId, imageUrl: localPath });
+      return NextResponse.json({ episodeId, imageUrl });
     }
 
     // Generate for all episodes
@@ -94,15 +91,14 @@ export async function POST(request: NextRequest) {
           scriptContent?.sceneDescription || episode.narrationText || "cinematic scene";
 
         const imageUrl = await generateImage(sceneDescription, drama[0].style || "realistic");
-        const savePath = path.join(uploadDir, "images", `${dramaId}`, `episode-${episode.episodeNumber}.png`);
-        const localPath = await downloadImage(imageUrl, savePath);
 
+        // 直接使用 CogView 返回的远程 URL
         await db
           .update(episodes)
-          .set({ imageUrl: localPath })
+          .set({ imageUrl })
           .where(eq(episodes.id, episode.id));
 
-        results.push({ episodeNumber: episode.episodeNumber, imageUrl: localPath });
+        results.push({ episodeNumber: episode.episodeNumber, imageUrl });
       } catch (err) {
         console.error(`Failed to generate image for episode ${episode.episodeNumber}:`, err);
         results.push({ episodeNumber: episode.episodeNumber, imageUrl: "" });

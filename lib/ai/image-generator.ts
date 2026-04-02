@@ -27,7 +27,7 @@ export async function generateImage(
       Authorization: `Bearer ${GLM_API_KEY}`,
     },
     body: JSON.stringify({
-      model: "cogview-3-plus",
+      model: "cogview-3-flash",
       prompt: fullPrompt,
       size,
     }),
