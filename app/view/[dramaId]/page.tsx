@@ -50,7 +50,16 @@ export default function ViewDramaPage() {
       if (res.ok) {
         const data = await res.json();
         setDrama(data.drama);
-        setEpisodes(data.episodes);
+        // 将本地路径转为可访问的 URL
+        const processedEpisodes = (data.episodes || []).map((ep: EpisodeData) => ({
+          ...ep,
+          voiceoverUrl: ep.voiceoverUrl
+            ? ep.voiceoverUrl.startsWith("http")
+              ? ep.voiceoverUrl
+              : `/api/uploads/${ep.voiceoverUrl.replace(/^\.?\/?uploads\/?/, "")}`
+            : null,
+        }));
+        setEpisodes(processedEpisodes);
       }
     } catch {
       // ignore
@@ -159,6 +168,7 @@ export default function ViewDramaPage() {
             title: ep.title || "",
             imageUrl: ep.imageUrl,
             voiceoverUrl: ep.voiceoverUrl,
+            videoUrl: ep.videoUrl,
           }))}
         />
 

@@ -47,7 +47,16 @@ export default function PreviewPageContent() {
       const res = await fetch(`/api/dramas/${dramaId}`);
       if (res.ok) {
         const data = await res.json();
-        setEpisodes(data.episodes);
+        // 将本地路径转为可访问的 URL
+        const processedEpisodes = (data.episodes || []).map((ep: EpisodeData) => ({
+          ...ep,
+          voiceoverUrl: ep.voiceoverUrl
+            ? ep.voiceoverUrl.startsWith("http")
+              ? ep.voiceoverUrl
+              : `/api/uploads/${ep.voiceoverUrl.replace(/^\.?\/?uploads\/?/, "")}`
+            : null,
+        }));
+        setEpisodes(processedEpisodes);
       }
     } catch {
       setError("加载失败");
@@ -137,6 +146,52 @@ export default function PreviewPageContent() {
     }
   };
 
+  const handleGenerateVideos = async () => {
+    if (!dramaId) return;
+    setLoadingAction("video-gen");
+
+    try {
+      const res = await fetch("/api/generate/video", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dramaId }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        // 轮询检查视频生成进度
+        pollVideoProgress();
+      } else {
+        setError("视频生成启动失败");
+      }
+    } catch {
+      setError("视频生成失败");
+    } finally {
+      setLoadingAction("");
+    }
+  };
+
+  const pollVideoProgress = async () => {
+    if (!dramaId) return;
+    const maxAttempts = 60; // 最多轮询 5 分钟
+    let attempts = 0;
+
+    const poll = async () => {
+      attempts++;
+      await fetchEpisodes();
+
+      const allDone = episodes.every((ep) => ep.videoUrl);
+      if (allDone || attempts >= maxAttempts) {
+        setLoadingAction("");
+        return;
+      }
+
+      setTimeout(poll, 5000);
+    };
+
+    setTimeout(poll, 10000); // 首次等待 10 秒
+  };
+
   const handleExport = async (format: string, _resolution: string) => {
     if (!dramaId) return;
 
@@ -223,6 +278,7 @@ export default function PreviewPageContent() {
                 title: ep.title || "",
                 imageUrl: ep.imageUrl,
                 voiceoverUrl: ep.voiceoverUrl,
+                videoUrl: ep.videoUrl,
               }))}
             />
           </TabsContent>
@@ -238,10 +294,52 @@ export default function PreviewPageContent() {
 
           <TabsContent value="compose">
             <div className="space-y-4">
+              {/* AI 视频生成 */}
               <div className="border border-border/50 rounded-lg p-6 bg-card/50">
-                <h3 className="font-semibold mb-2">视频合成</h3>
+                <div className="flex items-center gap-2 mb-2">
+                  <Film className="h-5 w-5 text-emerald-400" />
+                  <h3 className="font-semibold">AI 视频生成</h3>
+                  <span className="text-xs bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded">CogVideoX Flash</span>
+                </div>
                 <p className="text-sm text-muted-foreground mb-4">
-                  将分镜图片和配音合成为视频。确保所有集都有分镜图片和配音。
+                  使用智谱 AI 将每集分镜图片生成动态短视频，画面会动起来。每集约需 1-3 分钟。
+                </p>
+                <div className="space-y-2 mb-6">
+                  {episodes.map((ep) => (
+                    <div key={ep.id} className="flex items-center gap-3 text-sm">
+                      <span className="w-16 shrink-0">EP{ep.episodeNumber}</span>
+                      <span className={`w-3 h-3 rounded-full ${ep.imageUrl ? "bg-emerald-500" : "bg-red-500"}`} />
+                      <span className="text-xs text-muted-foreground">分镜</span>
+                      <span className={`w-3 h-3 rounded-full ${ep.videoUrl ? "bg-emerald-500" : "bg-zinc-600"}`} />
+                      <span className="text-xs text-muted-foreground">AI视频</span>
+                      {ep.videoUrl && <span className="text-xs text-emerald-400">✓ 已生成</span>}
+                    </div>
+                  ))}
+                </div>
+                <Button
+                  onClick={handleGenerateVideos}
+                  disabled={loadingAction === "video-gen"}
+                  className="bg-emerald-600 hover:bg-emerald-500"
+                >
+                  {loadingAction === "video-gen" ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      视频生成中，请稍候...
+                    </>
+                  ) : (
+                    <>
+                      <Film className="h-4 w-4 mr-2" />
+                      生成 AI 视频
+                    </>
+                  )}
+                </Button>
+              </div>
+
+              {/* FFmpeg 幻灯片合成 */}
+              <div className="border border-border/50 rounded-lg p-6 bg-card/50">
+                <h3 className="font-semibold mb-2">幻灯片合成（备选）</h3>
+                <p className="text-sm text-muted-foreground mb-4">
+                  将分镜图片和配音合成为幻灯片视频（图片不动）。如果 AI 视频生成失败或没有分镜图，可以用这个。
                 </p>
                 <div className="space-y-2 mb-6">
                   {episodes.map((ep) => (
