@@ -267,6 +267,7 @@ export default function ViewDramaPage() {
             videoUrl: ep.videoUrl,
             subtitleUrl: ep.subtitleUrl,
           }))}
+          defaultEpisode={selectedEpisode}
         />
 
         {/* Episode list */}
@@ -314,19 +315,19 @@ export default function ViewDramaPage() {
 
       {/* Share Dialog */}
       <Dialog open={shareOpen} onOpenChange={setShareOpen}>
-        <DialogContent className="bg-card border-border/50 sm:max-w-md mx-4">
+        <DialogContent className="bg-card border-border/50 sm:max-w-md mx-4 max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>分享短剧</DialogTitle>
             <DialogDescription>
-              复制链接或分享到社交媒体，让更多人看到你的作品
+              复制链接或分享到社交媒体
             </DialogDescription>
           </DialogHeader>
 
           {shareInfo && (
             <div className="space-y-4 py-2">
-              {/* Cover preview */}
+              {/* Cover preview — smaller on mobile */}
               {shareInfo.coverUrl && (
-                <div className="aspect-video rounded-lg overflow-hidden bg-muted">
+                <div className="aspect-video rounded-lg overflow-hidden bg-muted max-h-48">
                   <img
                     src={shareInfo.coverUrl}
                     alt={shareInfo.title}
@@ -337,15 +338,15 @@ export default function ViewDramaPage() {
 
               {/* Title */}
               <div className="text-center">
-                <h3 className="font-semibold">{shareInfo.title}</h3>
-                <p className="text-sm text-muted-foreground mt-1">
-                  由 AI 创作
+                <h3 className="font-semibold text-sm">{shareInfo.title}</h3>
+                <p className="text-xs text-muted-foreground mt-1">
+                  由 AI 创作 · {episodes.length} 集
                 </p>
               </div>
 
               {/* Copy link */}
               <div className="flex items-center gap-2">
-                <div className="flex-1 bg-muted rounded-lg px-3 py-2 text-sm text-muted-foreground truncate">
+                <div className="flex-1 bg-muted rounded-lg px-3 py-2 text-xs text-muted-foreground truncate">
                   {shareInfo.shareUrl}
                 </div>
                 <Button
@@ -370,32 +371,29 @@ export default function ViewDramaPage() {
 
               {/* Social share buttons */}
               <div className="grid grid-cols-3 gap-2">
-                {/* WeChat — show tip to copy link */}
                 <button
                   onClick={() => setShowWechatTip(true)}
-                  className="flex flex-col items-center gap-1.5 p-3 rounded-lg border border-border/50 hover:bg-green-500/10 hover:border-green-500/50 transition-all"
+                  className="flex flex-col items-center gap-1 p-2.5 rounded-lg border border-border/50 hover:bg-green-500/10 transition-all"
                 >
                   <MessageCircle className="h-5 w-5 text-green-500" />
                   <span className="text-xs text-muted-foreground">微信</span>
                 </button>
 
-                {/* Weibo */}
                 <a
                   href={getWeiboShareUrl()}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex flex-col items-center gap-1.5 p-3 rounded-lg border border-border/50 hover:bg-red-500/10 hover:border-red-500/50 transition-all"
+                  className="flex flex-col items-center gap-1 p-2.5 rounded-lg border border-border/50 hover:bg-red-500/10 transition-all"
                 >
                   <ExternalLink className="h-5 w-5 text-red-500" />
                   <span className="text-xs text-muted-foreground">微博</span>
                 </a>
 
-                {/* QQ */}
                 <a
                   href={getQQShareUrl()}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex flex-col items-center gap-1.5 p-3 rounded-lg border border-border/50 hover:bg-blue-500/10 hover:border-blue-500/50 transition-all"
+                  className="flex flex-col items-center gap-1 p-2.5 rounded-lg border border-border/50 hover:bg-blue-500/10 transition-all"
                 >
                   <QrCode className="h-5 w-5 text-blue-500" />
                   <span className="text-xs text-muted-foreground">QQ</span>
@@ -405,15 +403,15 @@ export default function ViewDramaPage() {
               {/* WeChat tip */}
               {showWechatTip && (
                 <div className="p-3 rounded-lg bg-green-500/5 border border-green-500/20">
-                  <p className="text-sm text-green-400">
-                    💡 请点击上方「复制」按钮，然后在微信中粘贴链接发送给朋友
+                  <p className="text-xs text-green-400">
+                    请点击上方「复制」按钮，然后在微信中粘贴链接发送给朋友
                   </p>
                 </div>
               )}
 
-              {/* Short video platform tip */}
+              {/* Tip */}
               <p className="text-xs text-muted-foreground text-center">
-                💡 复制链接发送给朋友，即可分享你的 AI 短剧作品
+                复制链接发送给朋友，即可分享你的 AI 短剧作品
               </p>
             </div>
           )}

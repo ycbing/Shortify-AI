@@ -316,10 +316,13 @@ function DramaCardWithActions({ drama, onDelete, onCopy, copying }: DramaCardPro
     }
   };
 
+  const getViewUrl = () => `/view/${drama.id}`;
+  const dramaCompleted = drama.status === "completed";
+
   return (
     <div className="group border border-border/50 rounded-xl overflow-hidden bg-card/50 hover:border-emerald-500/50 hover:bg-card/80 transition-all duration-300">
       {/* Cover — clickable */}
-      <Link href={getEditorUrl()} className="block">
+      <Link href={dramaCompleted ? getViewUrl() : getEditorUrl()} className="block">
         <div className="relative aspect-video bg-muted overflow-hidden">
           {coverSrc ? (
             <img
@@ -341,7 +344,7 @@ function DramaCardWithActions({ drama, onDelete, onCopy, copying }: DramaCardPro
       </Link>
 
       <div className="p-3 sm:p-4">
-        <Link href={getEditorUrl()}>
+        <Link href={dramaCompleted ? getViewUrl() : getEditorUrl()}>
           <h3 className="font-semibold text-sm truncate mb-1 hover:text-emerald-400 transition">{drama.title}</h3>
         </Link>
         <div className="flex items-center justify-between text-xs text-muted-foreground mb-2">

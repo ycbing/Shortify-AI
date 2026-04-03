@@ -16,6 +16,7 @@ interface EpisodeData {
 interface VideoPreviewProps {
   videoUrl: string | null;
   episodes?: EpisodeData[];
+  defaultEpisode?: number;
 }
 
 /** Convert a local upload path to a public /api/uploads/ URL */
@@ -25,11 +26,18 @@ function toPublicUrl(localPath: string | null | undefined): string | null {
   return `/api/uploads/${localPath.replace(/^\.?\/?uploads\/?/, "")}`;
 }
 
-export function VideoPreview({ videoUrl, episodes = [] }: VideoPreviewProps) {
+export function VideoPreview({ videoUrl, episodes = [], defaultEpisode }: VideoPreviewProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
-  const [currentEpisode, setCurrentEpisode] = useState(0);
+  const [currentEpisode, setCurrentEpisode] = useState(defaultEpisode || 0);
+
+  // Sync with external defaultEpisode changes (e.g. from episode list in parent)
+  useEffect(() => {
+    if (defaultEpisode !== undefined) {
+      setCurrentEpisode(defaultEpisode);
+    }
+  }, [defaultEpisode]);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const currentEp = episodes[currentEpisode];
