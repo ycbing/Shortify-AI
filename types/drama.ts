@@ -29,6 +29,52 @@ export interface DramaStyle {
 
 export type DramaStyleType = keyof DramaStyle;
 
+// ============ Shot-based (v2) types ============
+
+export interface Character {
+  name: string;
+  description: string;
+  voiceId: string;
+}
+
+export interface Shot {
+  shotNumber: number;
+  visual: string;
+  duration: number;
+  type?: "dialogue" | "narration";
+  character?: string;
+  line?: string;
+  voiceId?: string;
+  subtitle?: string;
+  bgm?: string;
+  aiVideoUrl?: string; // CogVideoX generated video local path
+}
+
+export interface ShotAudio {
+  shotNumber: number;
+  audioUrl: string;
+  duration: number;
+  type: "dialogue" | "narration";
+  character?: string;
+}
+
+// ============ New script format (v2) ============
+
+export interface GeneratedScriptV2 {
+  title: string;
+  characters: Character[];
+  episodes: GeneratedEpisodeV2[];
+}
+
+export interface GeneratedEpisodeV2 {
+  episodeNumber: number;
+  title: string;
+  sceneDescription: string;
+  shots: Shot[];
+}
+
+// ============ Legacy format (v1) ============
+
 export interface GeneratedScript {
   title: string;
   episodes: GeneratedEpisode[];
@@ -47,6 +93,8 @@ export interface Dialogue {
   character: string;
   line: string;
 }
+
+// ============ Unified input ============
 
 export interface CreateDramaInput {
   theme: string;
@@ -74,3 +122,43 @@ export interface DramaWithEpisodes {
     duration: number | null;
   }[];
 }
+
+// ============ Helpers ============
+
+/** Type guard: check if script is v2 (shot-based) format */
+export function isScriptV2(
+  script: GeneratedScript | GeneratedScriptV2
+): script is GeneratedScriptV2 {
+  return "characters" in script && Array.isArray((script as GeneratedScriptV2).characters);
+}
+
+/** Voice IDs available for selection */
+export const VOICE_OPTIONS = {
+  "男声-年轻": "zh-CN-YunxiNeural",
+  "男声-中年": "zh-CN-YunjianNeural",
+  "女声-年轻": "zh-CN-XiaoxiaoNeural",
+  "女声-中年": "zh-CN-XiaomengNeural",
+  "旁白": "zh-CN-YunyangNeural",
+} as const;
+
+export const NARRATION_VOICE = "zh-CN-YunyangNeural";
+
+export type VoiceId = (typeof VOICE_OPTIONS)[keyof typeof VOICE_OPTIONS];
+
+/** BGM type options */
+export type BgmType =
+  | "suspense"
+  | "romantic"
+  | "tense"
+  | "calm"
+  | "dramatic"
+  | "happy";
+
+export const BGM_LABELS: Record<BgmType, string> = {
+  suspense: "悬疑",
+  romantic: "浪漫",
+  tense: "紧张",
+  calm: "平静",
+  dramatic: "戏剧性",
+  happy: "欢快",
+};

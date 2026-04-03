@@ -30,6 +30,7 @@
     "bcryptjs": "^3.0.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "cos-nodejs-sdk-v5": "^2.15.4",
     "drizzle-orm": "^0.45.2",
     "edge-tts": "^1.0.1",
     "lucide-react": "^1.7.0",

@@ -44,7 +44,13 @@ export default function StoryboardPageContent() {
           data.episodes.map((ep: { episodeNumber: number; title: string; imageUrl: string | null; narrationText: string }) => ({
             episodeNumber: ep.episodeNumber,
             title: ep.title || `第${ep.episodeNumber}集`,
-            imageUrl: ep.imageUrl,
+            imageUrl: ep.imageUrl
+              ? ep.imageUrl.includes(".cos.") && ep.imageUrl.startsWith("http")
+                ? (() => { try { const u = new URL(ep.imageUrl); return `/api/uploads/cos/${encodeURIComponent(u.pathname.slice(1))}`; } catch { return ep.imageUrl; } })()
+                : ep.imageUrl.startsWith("http")
+                ? ep.imageUrl
+                : `/api/uploads/${ep.imageUrl.replace(/^\.?\/?uploads\/?/, "")}`
+              : null,
             narration: ep.narrationText || "",
           }))
         );

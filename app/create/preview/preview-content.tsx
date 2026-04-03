@@ -25,7 +25,25 @@ interface EpisodeData {
   imageUrl: string | null;
   voiceoverUrl: string | null;
   videoUrl: string | null;
+  subtitleUrl: string | null;
   duration: number | null;
+}
+
+/** Convert a local upload path or COS URL to an accessible URL */
+function toPublicUrl(localPath: string | null): string | null {
+  if (!localPath) return null;
+  // COS URL -> proxy through /api/uploads/cos/ for signed access
+  if (localPath.includes(".cos.") && localPath.startsWith("http")) {
+    try {
+      const url = new URL(localPath);
+      const cosKey = url.pathname.slice(1); // remove leading /
+      return `/api/uploads/cos/${encodeURIComponent(cosKey)}`;
+    } catch {
+      return localPath;
+    }
+  }
+  if (localPath.startsWith("http")) return localPath;
+  return `/api/uploads/${localPath.replace(/^\.?\/?uploads\/?/, "")}`;
 }
 
 export default function PreviewPageContent() {
@@ -50,11 +68,10 @@ export default function PreviewPageContent() {
         // 将本地路径转为可访问的 URL
         const processedEpisodes = (data.episodes || []).map((ep: EpisodeData) => ({
           ...ep,
-          voiceoverUrl: ep.voiceoverUrl
-            ? ep.voiceoverUrl.startsWith("http")
-              ? ep.voiceoverUrl
-              : `/api/uploads/${ep.voiceoverUrl.replace(/^\.?\/?uploads\/?/, "")}`
-            : null,
+          voiceoverUrl: toPublicUrl(ep.voiceoverUrl),
+          imageUrl: toPublicUrl(ep.imageUrl),
+          videoUrl: toPublicUrl(ep.videoUrl),
+          subtitleUrl: toPublicUrl(ep.subtitleUrl),
         }));
         setEpisodes(processedEpisodes);
       }
@@ -279,6 +296,7 @@ export default function PreviewPageContent() {
                 imageUrl: ep.imageUrl,
                 voiceoverUrl: ep.voiceoverUrl,
                 videoUrl: ep.videoUrl,
+                subtitleUrl: ep.subtitleUrl,
               }))}
             />
           </TabsContent>

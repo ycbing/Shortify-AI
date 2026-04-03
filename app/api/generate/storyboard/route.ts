@@ -4,8 +4,11 @@ import { db } from "@/lib/db";
 import { dramas, episodes, generationTasks } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
-import { generateImage, downloadImage } from "@/lib/ai/image-generator";
+import { generateImage } from "@/lib/ai/image-generator";
+import { uploadFileToCos, imageCosKey } from "@/lib/ai/cos-storage";
 import path from "path";
+import fs from "fs/promises";
+import type { Shot } from "@/types/drama";
 
 export async function POST(request: NextRequest) {
   try {
@@ -40,6 +43,13 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "短剧不存在" }, { status: 404 });
       }
 
+      // V2: shot-based image generation
+      if (episode.shotData && Array.isArray(episode.shotData)) {
+        const shotResult = await handleShotStoryboard(episode, drama[0].style, dramaId, uploadDir);
+        return NextResponse.json(shotResult);
+      }
+
+      // V1: legacy single image per episode
       const scriptContent = episode.scriptContent
         ? JSON.parse(episode.scriptContent)
         : null;
@@ -48,7 +58,6 @@ export async function POST(request: NextRequest) {
 
       const imageUrl = await generateImage(sceneDescription, drama[0].style || "realistic");
 
-      // 直接使用 CogView 返回的远程 URL
       await db
         .update(episodes)
         .set({ imageUrl })
@@ -79,10 +88,18 @@ export async function POST(request: NextRequest) {
       startedAt: new Date(),
     });
 
-    const results: { episodeNumber: number; imageUrl: string }[] = [];
+    const results: { episodeNumber: number; imageUrl: string; shotImages?: { shotNumber: number; imageUrl: string }[] }[] = [];
 
     for (const episode of allEpisodes) {
       try {
+        // V2: shot-based
+        if (episode.shotData && Array.isArray(episode.shotData)) {
+          const result = await handleShotStoryboard(episode, drama[0].style, dramaId, uploadDir);
+          results.push(result);
+          continue;
+        }
+
+        // V1: legacy
         const scriptContent = episode.scriptContent
           ? JSON.parse(episode.scriptContent)
           : null;
@@ -92,7 +109,6 @@ export async function POST(request: NextRequest) {
 
         const imageUrl = await generateImage(sceneDescription, drama[0].style || "realistic");
 
-        // 直接使用 CogView 返回的远程 URL
         await db
           .update(episodes)
           .set({ imageUrl })
@@ -123,4 +139,67 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+// ============ V2: Shot-level storyboard ============
+
+async function handleShotStoryboard(
+  episode: { id: string; episodeNumber: number; shotData: unknown },
+  style: string | null,
+  dramaId: string,
+  uploadDir: string
+): Promise<{ episodeNumber: number; imageUrl: string; shotImages: { shotNumber: number; imageUrl: string }[] }> {
+  const shots = episode.shotData as unknown as Shot[];
+  const shotImages: { shotNumber: number; imageUrl: string }[] = [];
+
+  // Generate image for each shot's visual description
+  for (const shot of shots) {
+    try {
+      const imageUrl = await generateImage(
+        shot.visual,
+        style || "realistic",
+        "1280x720"
+      );
+
+      // Download image to local storage
+      const savePath = path.join(
+        uploadDir,
+        "images",
+        dramaId,
+        `episode-${episode.episodeNumber}`,
+        `shot-${shot.shotNumber}.jpg`
+      );
+      await fs.mkdir(path.dirname(savePath), { recursive: true });
+
+      const response = await fetch(imageUrl);
+      if (response.ok) {
+        const buffer = Buffer.from(await response.arrayBuffer());
+        await fs.writeFile(savePath, buffer);
+
+        // Upload to COS if configured
+        const cosKey = imageCosKey(dramaId, episode.episodeNumber, shot.shotNumber);
+        const finalUrl = await uploadFileToCos(savePath, cosKey);
+        shotImages.push({ shotNumber: shot.shotNumber, imageUrl: finalUrl });
+      } else {
+        shotImages.push({ shotNumber: shot.shotNumber, imageUrl });
+      }
+    } catch (err) {
+      console.error(`Failed to generate image for shot ${shot.shotNumber}:`, err);
+      shotImages.push({ shotNumber: shot.shotNumber, imageUrl: "" });
+    }
+  }
+
+  // Use first shot image as episode image
+  const firstImageUrl = shotImages.find((s) => s.imageUrl)?.imageUrl || "";
+
+  await db
+    .update(episodes)
+    .set({ imageUrl: firstImageUrl || null })
+    .where(eq(episodes.id, episode.id));
+
+  return {
+    episodeNumber: episode.episodeNumber,
+    imageUrl: firstImageUrl,
+    shotImages,
+  };
 }

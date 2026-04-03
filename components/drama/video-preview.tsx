@@ -10,11 +10,19 @@ interface EpisodeData {
   imageUrl: string | null;
   voiceoverUrl: string | null;
   videoUrl?: string | null;
+  subtitleUrl?: string | null;
 }
 
 interface VideoPreviewProps {
   videoUrl: string | null;
   episodes?: EpisodeData[];
+}
+
+/** Convert a local upload path to a public /api/uploads/ URL */
+function toPublicUrl(localPath: string | null | undefined): string | null {
+  if (!localPath) return null;
+  if (localPath.startsWith("http")) return localPath;
+  return `/api/uploads/${localPath.replace(/^\.?\/?uploads\/?/, "")}`;
 }
 
 export function VideoPreview({ videoUrl, episodes = [] }: VideoPreviewProps) {
@@ -25,8 +33,11 @@ export function VideoPreview({ videoUrl, episodes = [] }: VideoPreviewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   const currentEp = episodes[currentEpisode];
-  // 优先使用每集的 AI 视频，其次用合并后的完整视频，最后用图片+配音幻灯片
   const currentVideoUrl = currentEp?.videoUrl || videoUrl;
+  // subtitleUrl may still be a local path from the API, convert it
+  const currentSubtitleUrl = currentEp?.subtitleUrl
+    ? currentEp.subtitleUrl.startsWith("/api/") ? currentEp.subtitleUrl : toPublicUrl(currentEp.subtitleUrl)
+    : null;
 
   const handlePlayPause = async () => {
     if (currentVideoUrl && videoRef.current) {
@@ -70,16 +81,13 @@ export function VideoPreview({ videoUrl, episodes = [] }: VideoPreviewProps) {
     }
   };
 
-  // 切换剧集时加载对应视频/音频
   useEffect(() => {
     const video = videoRef.current;
     const audio = audioRef.current;
 
-    // 暂停当前播放
     if (video) { video.pause(); video.currentTime = 0; }
     if (audio) { audio.pause(); audio.currentTime = 0; }
 
-    // 加载新一集
     const epVideoUrl = currentEp?.videoUrl || videoUrl;
     if (epVideoUrl && video) {
       video.src = epVideoUrl;
@@ -93,7 +101,6 @@ export function VideoPreview({ videoUrl, episodes = [] }: VideoPreviewProps) {
     setPlaying(false);
   }, [currentEpisode, currentEp?.videoUrl, currentEp?.voiceoverUrl, videoUrl]);
 
-  // 音频播放结束自动下一集
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
@@ -107,7 +114,6 @@ export function VideoPreview({ videoUrl, episodes = [] }: VideoPreviewProps) {
     return () => { audio.onended = null; };
   }, [currentEpisode, episodes.length]);
 
-  // 视频播放结束自动下一集
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -132,10 +138,10 @@ export function VideoPreview({ videoUrl, episodes = [] }: VideoPreviewProps) {
 
   return (
     <div ref={containerRef} className="border border-border/50 rounded-lg overflow-hidden bg-black">
-      <video ref={videoRef} className="hidden" />
+      {/* Hidden elements for ref-based control */}
       <audio ref={audioRef} />
 
-      {/* 视频或幻灯片画面 */}
+      {/* Video or slideshow display */}
       <div className="aspect-video relative bg-muted flex items-center justify-center">
         {currentVideoUrl ? (
           <video
@@ -144,7 +150,17 @@ export function VideoPreview({ videoUrl, episodes = [] }: VideoPreviewProps) {
             className="w-full h-full object-contain"
             playsInline
             controls
-          />
+          >
+            {currentSubtitleUrl && (
+              <track
+                kind="subtitles"
+                src={currentSubtitleUrl}
+                srcLang="zh"
+                label="中文"
+                default
+              />
+            )}
+          </video>
         ) : currentEp?.imageUrl ? (
           <img
             src={currentEp.imageUrl}
@@ -158,22 +174,29 @@ export function VideoPreview({ videoUrl, episodes = [] }: VideoPreviewProps) {
           </div>
         )}
 
-        {/* 集数指示器（幻灯片模式或有多集时显示） */}
+        {/* Episode indicator */}
         {episodes.length > 1 && (
           <div className="absolute bottom-2 right-2 text-xs text-white/70 bg-black/50 px-2 py-1 rounded">
             {currentEpisode + 1} / {episodes.length}
           </div>
         )}
 
-        {/* AI 视频标记 */}
+        {/* AI video badge */}
         {currentEp?.videoUrl && (
           <div className="absolute top-2 left-2 text-xs text-emerald-400 bg-black/50 px-2 py-1 rounded">
             AI 视频
           </div>
         )}
+
+        {/* Subtitle badge */}
+        {currentSubtitleUrl && (
+          <div className="absolute top-2 right-2 text-xs text-blue-400 bg-black/50 px-2 py-1 rounded">
+            📝 字幕
+          </div>
+        )}
       </div>
 
-      {/* 控制栏（仅幻灯片模式显示自定义控制，视频模式用原生 controls） */}
+      {/* Custom controls (only in slideshow mode) */}
       {!currentVideoUrl && (
         <div className="flex items-center justify-center gap-2 p-3 bg-card">
           <Button variant="ghost" size="sm" onClick={handlePrev} disabled={currentEpisode === 0}>

@@ -4,8 +4,9 @@ import { db } from "@/lib/db";
 import { dramas, episodes, generationTasks } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
-import { generateScript } from "@/lib/ai/script-generator";
-import type { DramaGenreType, DramaStyleType } from "@/types/drama";
+import { generateScript, extractNarrationFromShots } from "@/lib/ai/script-generator";
+import { isScriptV2 } from "@/types/drama";
+import type { DramaGenreType, DramaStyleType, GeneratedScriptV2 } from "@/types/drama";
 
 export async function POST(request: NextRequest) {
   try {
@@ -48,7 +49,7 @@ export async function POST(request: NextRequest) {
       startedAt: new Date(),
     });
 
-    // Generate script
+    // Generate script (always V2 now)
     const script = await generateScript(
       drama.theme || "都市情感",
       (drama.genre as DramaGenreType) || "romance",
@@ -56,30 +57,39 @@ export async function POST(request: NextRequest) {
       drama.episodeCount || 3
     );
 
-    // Update drama title
+    // Update drama title and characters (V2)
+    const updateData: Record<string, unknown> = {
+      title: script.title,
+      status: "script_ready",
+      updatedAt: new Date(),
+    };
+
+    if (isScriptV2(script)) {
+      updateData.characters = script.characters;
+    }
+
     await db
       .update(dramas)
-      .set({
-        title: script.title,
-        status: "script_ready",
-        updatedAt: new Date(),
-      })
+      .set(updateData)
       .where(eq(dramas.id, dramaId));
 
-    // Create episodes
+    // Create episodes (V2 format)
     for (const ep of script.episodes) {
+      const v2Ep = ep as GeneratedScriptV2["episodes"][number];
+      const narrationText = extractNarrationFromShots(v2Ep.shots);
+
       await db.insert(episodes).values({
         id: uuidv4(),
         dramaId,
         episodeNumber: ep.episodeNumber,
         title: ep.title,
         scriptContent: JSON.stringify({
-          narration: ep.narration,
-          sceneDescription: ep.sceneDescription,
-          dialogues: ep.dialogues,
+          sceneDescription: v2Ep.sceneDescription,
+          shots: v2Ep.shots,
         }),
-        narrationText: ep.narration,
-        duration: ep.duration,
+        narrationText,
+        shotData: v2Ep.shots,
+        duration: v2Ep.shots.reduce((sum, s) => sum + (s.duration || 5), 0),
       });
     }
 

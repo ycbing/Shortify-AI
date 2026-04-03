@@ -52,6 +52,7 @@ export const dramas = pgTable(
     status: text("status").default("draft"), // draft/generating/script_ready/storyboard_ready/voiceover_ready/completed/error
     totalDuration: integer("total_duration"),
     coverUrl: text("cover_url"),
+    characters: jsonb("characters"), // v2: character list with voiceId
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -68,12 +69,14 @@ export const episodes = pgTable(
       .references(() => dramas.id, { onDelete: "cascade" }),
     episodeNumber: integer("episode_number").notNull(),
     title: text("title"),
-    scriptContent: text("script_content"), // full script text
-    narrationText: text("narration_text"), // narration for TTS
+    scriptContent: text("script_content"), // full script text (JSON string)
+    narrationText: text("narration_text"), // narration for TTS (v1 fallback)
     imageUrl: text("image_url"), // storyboard image
     voiceoverUrl: text("voiceover_url"), // voiceover audio
     videoUrl: text("video_url"), // episode video
     duration: integer("duration"), // seconds
+    shotData: jsonb("shot_data"), // v2: shots array (JSON)
+    subtitleUrl: text("subtitle_url"), // v2: SRT subtitle file path
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
@@ -91,7 +94,7 @@ export const generationTasks = pgTable(
       .notNull()
       .references(() => dramas.id, { onDelete: "cascade" }),
     episodeId: text("episode_id").references(() => episodes.id, { onDelete: "set null" }),
-    type: text("type").notNull(), // script/storyboard/voiceover/compose
+    type: text("type").notNull(), // script/storyboard/voiceover/compose/subtitle/video
     status: text("status").default("pending"), // pending/processing/completed/failed
     inputData: jsonb("input_data"),
     outputData: jsonb("output_data"),

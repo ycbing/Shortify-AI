@@ -4,7 +4,8 @@ import { db } from "@/lib/db";
 import { dramas, episodes, generationTasks } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
-import { generateVoiceover } from "@/lib/ai/voiceover-generator";
+import { generateVoiceover, generateShotVoiceovers } from "@/lib/ai/voiceover-generator";
+import type { Shot } from "@/types/drama";
 import path from "path";
 
 export async function POST(request: NextRequest) {
@@ -31,11 +32,54 @@ export async function POST(request: NextRequest) {
         .where(and(eq(episodes.id, episodeId), eq(episodes.dramaId, dramaId)))
         .limit(1);
 
-      if (!episode || !episode.narrationText) {
-        return NextResponse.json({ error: "剧集不存在或无旁白文本" }, { status: 404 });
+      if (!episode) {
+        return NextResponse.json({ error: "剧集不存在" }, { status: 404 });
       }
 
-      const outputPath = path.join(uploadDir, "voiceovers", `${dramaId}`, `episode-${episode.episodeNumber}.mp3`);
+      // Check if V2 (shot-based)
+      if (episode.shotData && Array.isArray(episode.shotData)) {
+        // V2: generate per-shot voiceovers
+        const shots = episode.shotData as Shot[];
+        const shotAudios = await generateShotVoiceovers(
+          shots,
+          dramaId,
+          episode.episodeNumber
+        );
+
+        // Store shot audio results in episode's scriptContent or outputData
+        const totalDuration = shotAudios.reduce((sum, a) => sum + a.duration, 0);
+
+        await db
+          .update(episodes)
+          .set({
+            voiceoverUrl: path.join(
+              uploadDir,
+              "voiceovers",
+              dramaId,
+              `episode-${episode.episodeNumber}`
+            ),
+            duration: Math.round(totalDuration),
+          })
+          .where(eq(episodes.id, episodeId));
+
+        return NextResponse.json({
+          episodeId,
+          shotAudios,
+          totalDuration: Math.round(totalDuration),
+        });
+      }
+
+      // V1 fallback: single narration voiceover
+      if (!episode.narrationText) {
+        return NextResponse.json({ error: "剧集无旁白文本" }, { status: 404 });
+      }
+
+      const outputPath = path.join(
+        uploadDir,
+        "voiceovers",
+        `${dramaId}`,
+        `episode-${episode.episodeNumber}.mp3`
+      );
 
       const result = await generateVoiceover(episode.narrationText, outputPath);
 
@@ -71,34 +115,66 @@ export async function POST(request: NextRequest) {
       startedAt: new Date(),
     });
 
-    const results: { episodeNumber: number; voiceoverUrl: string; duration: number }[] = [];
+    const results: { episodeNumber: number; voiceoverUrl: string; duration: number; shotAudios?: unknown[] }[] = [];
 
     for (const episode of allEpisodes) {
-      if (!episode.narrationText) continue;
-
       try {
-        const outputPath = path.join(
-          uploadDir,
-          "voiceovers",
-          `${dramaId}`,
-          `episode-${episode.episodeNumber}.mp3`
-        );
+        if (episode.shotData && Array.isArray(episode.shotData)) {
+          // V2: per-shot voiceovers
+          const shots = episode.shotData as Shot[];
+          const shotAudios = await generateShotVoiceovers(
+            shots,
+            dramaId,
+            episode.episodeNumber
+          );
 
-        const result = await generateVoiceover(episode.narrationText, outputPath);
+          const totalDuration = shotAudios.reduce((sum, a) => sum + a.duration, 0);
+          const voiceoverDir = path.join(
+            uploadDir,
+            "voiceovers",
+            dramaId,
+            `episode-${episode.episodeNumber}`
+          );
 
-        await db
-          .update(episodes)
-          .set({
+          await db
+            .update(episodes)
+            .set({
+              voiceoverUrl: voiceoverDir,
+              duration: Math.round(totalDuration),
+            })
+            .where(eq(episodes.id, episode.id));
+
+          results.push({
+            episodeNumber: episode.episodeNumber,
+            voiceoverUrl: voiceoverDir,
+            duration: Math.round(totalDuration),
+            shotAudios,
+          });
+        } else if (episode.narrationText) {
+          // V1 fallback
+          const outputPath = path.join(
+            uploadDir,
+            "voiceovers",
+            `${dramaId}`,
+            `episode-${episode.episodeNumber}.mp3`
+          );
+
+          const result = await generateVoiceover(episode.narrationText, outputPath);
+
+          await db
+            .update(episodes)
+            .set({
+              voiceoverUrl: result.filePath,
+              duration: result.durationSeconds,
+            })
+            .where(eq(episodes.id, episode.id));
+
+          results.push({
+            episodeNumber: episode.episodeNumber,
             voiceoverUrl: result.filePath,
             duration: result.durationSeconds,
-          })
-          .where(eq(episodes.id, episode.id));
-
-        results.push({
-          episodeNumber: episode.episodeNumber,
-          voiceoverUrl: result.filePath,
-          duration: result.durationSeconds,
-        });
+          });
+        }
       } catch (err) {
         console.error(`Failed to generate voiceover for episode ${episode.episodeNumber}:`, err);
       }

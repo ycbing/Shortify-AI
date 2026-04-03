@@ -1,0 +1,165 @@
+import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@/lib/auth";
+import { db } from "@/lib/db";
+import { dramas, episodes, generationTasks } from "@/lib/db/schema";
+import { eq, and } from "drizzle-orm";
+import { v4 as uuidv4 } from "uuid";
+import { generateSubtitles } from "@/lib/ai/subtitle-generator";
+import type { Shot, ShotAudio } from "@/types/drama";
+
+export async function POST(request: NextRequest) {
+  try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "未登录" }, { status: 401 });
+    }
+
+    const body = await request.json();
+    const { dramaId, episodeId } = body;
+
+    if (!dramaId) {
+      return NextResponse.json({ error: "缺少 dramaId" }, { status: 400 });
+    }
+
+    // Get episodes for this drama
+    const episodeQuery = episodeId
+      ? db
+          .select()
+          .from(episodes)
+          .where(and(eq(episodes.id, episodeId), eq(episodes.dramaId, dramaId)))
+      : db
+          .select()
+          .from(episodes)
+          .where(eq(episodes.dramaId, dramaId))
+          .orderBy(episodes.episodeNumber);
+
+    const targetEpisodes = await episodeQuery;
+
+    if (targetEpisodes.length === 0) {
+      return NextResponse.json({ error: "没有找到剧集" }, { status: 404 });
+    }
+
+    const taskId = uuidv4();
+    await db.insert(generationTasks).values({
+      id: taskId,
+      dramaId,
+      type: "subtitle",
+      status: "processing",
+      inputData: { episodeCount: targetEpisodes.length },
+      startedAt: new Date(),
+    });
+
+    const results: { episodeNumber: number; subtitleUrl: string }[] = [];
+
+    for (const episode of targetEpisodes) {
+      if (!episode.shotData || !Array.isArray(episode.shotData)) {
+        console.log(`Episode ${episode.episodeNumber} has no shotData, skipping`);
+        continue;
+      }
+
+      const shots = episode.shotData as Shot[];
+
+      // Reconstruct ShotAudio from voiceover directory
+      // The voiceoverUrl for V2 is the directory path containing shot-*.mp3 files
+      const shotAudios = await reconstructShotAudios(
+        shots,
+        episode.voiceoverUrl,
+        dramaId,
+        episode.episodeNumber
+      );
+
+      const subtitleUrl = await generateSubtitles(
+        shots,
+        shotAudios,
+        dramaId,
+        episode.episodeNumber
+      );
+
+      await db
+        .update(episodes)
+        .set({ subtitleUrl })
+        .where(eq(episodes.id, episode.id));
+
+      results.push({
+        episodeNumber: episode.episodeNumber,
+        subtitleUrl,
+      });
+    }
+
+    await db
+      .update(generationTasks)
+      .set({ status: "completed", outputData: { results }, completedAt: new Date() })
+      .where(eq(generationTasks.id, taskId));
+
+    return NextResponse.json({ taskId, results });
+  } catch (error) {
+    console.error("Subtitle generation failed:", error);
+    return NextResponse.json(
+      { error: `字幕生成失败: ${error instanceof Error ? error.message : "未知错误"}` },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * Reconstruct ShotAudio array by reading audio files from the voiceover directory.
+ */
+async function reconstructShotAudios(
+  shots: Shot[],
+  voiceoverUrl: string | null,
+  dramaId: string,
+  episodeNumber: number
+): Promise<ShotAudio[]> {
+  const fs = await import("fs/promises");
+  const { exec } = await import("child_process");
+  const { promisify } = await import("util");
+  const execAsync = promisify(exec);
+  const path = await import("path");
+
+  const shotAudios: ShotAudio[] = [];
+
+  // Determine the voiceover directory
+  let voiceoverDir: string;
+  if (voiceoverUrl) {
+    voiceoverDir = voiceoverUrl;
+  } else {
+    voiceoverDir = path.join(
+      process.env.UPLOAD_DIR || "./uploads",
+      "voiceovers",
+      dramaId,
+      `episode-${episodeNumber}`
+    );
+  }
+
+  for (const shot of shots) {
+    const audioPath = path.join(voiceoverDir, `shot-${shot.shotNumber}.mp3`);
+    let duration = shot.duration || 5;
+    let exists = false;
+
+    try {
+      await fs.access(audioPath);
+      exists = true;
+      // Get actual duration
+      try {
+        const { stdout } = await execAsync(
+          `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${audioPath}"`
+        );
+        duration = parseFloat(stdout.trim()) || duration;
+      } catch {
+        // use estimated duration
+      }
+    } catch {
+      // file doesn't exist, use estimated duration
+    }
+
+    shotAudios.push({
+      shotNumber: shot.shotNumber,
+      audioUrl: audioPath,
+      duration: Math.round(duration * 10) / 10,
+      type: shot.type === "dialogue" ? "dialogue" : "narration",
+      character: shot.character,
+    });
+  }
+
+  return shotAudios;
+}

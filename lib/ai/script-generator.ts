@@ -1,5 +1,12 @@
 import { chatCompletionJSON } from "./glm-client";
-import type { GeneratedScript, GeneratedEpisode, DramaGenreType, DramaStyleType } from "@/types/drama";
+import type {
+  GeneratedScriptV2,
+  GeneratedEpisodeV2,
+  Shot,
+  Character,
+  DramaGenreType,
+  DramaStyleType,
+} from "@/types/drama";
 
 const GENRE_MAP: Record<DramaGenreType, string> = {
   mystery: "悬疑",
@@ -23,47 +30,93 @@ const STYLE_IMAGE_PROMPT: Record<DramaStyleType, string> = {
   cyberpunk: "赛博朋克风格，霓虹灯光，未来科技感，暗色调配高饱和色彩",
 };
 
+/**
+ * Generate script in v2 shot-based format with character dialogues
+ */
 export async function generateScript(
   theme: string,
   genre: DramaGenreType,
   style: DramaStyleType,
   episodeCount: number
-): Promise<GeneratedScript> {
+): Promise<GeneratedScriptV2> {
   const systemPrompt = `你是一个专业的短剧编剧。你需要根据用户给出的主题、题材和画风，创作一部精彩的短剧剧本。
 
-输出要求：
-1. 每集时长 30-60 秒（旁白字数控制在 80-150 字）
-2. 旁白要简洁有画面感，适合作为视频旁白朗读
-3. 场景描述要详细，适合 AI 图片生成（包含人物外貌、场景细节、构图方式、色调氛围）
-4. 剧情要有反转或悬念，每集结尾留钩子
-5. 角色要有辨识度，固定角色外貌描述以保证一致性
+## 输出要求
 
-你必须输出严格的 JSON 格式，包含以下结构：
+1. **集数**: 共 ${episodeCount} 集
+2. **每集时长**: 30-60 秒（由 shots 累计时长决定）
+3. **shots**: 每集由多个镜头(shots)组成，每个 shot 3-8 秒
+4. **角色对话**: 必须有角色对话（不只是旁白），对话要有冲突、悬念、情感张力
+5. **角色外貌**: 描述要详细且一致（同一角色在所有镜头中描述一致）
+6. **sceneDescription**: 要详细到可以直接生成图片，包含场景、光线、构图
+7. **角色对话用引号**，旁白/字幕描述用括号
+8. **每集结尾留钩子**，让观众想看下一集
+
+## 画风
+${STYLE_MAP[style]}：${STYLE_IMAGE_PROMPT[style]}
+
+## 音色选择 (voiceId)
+- 男声-年轻: zh-CN-YunxiNeural
+- 男声-中年: zh-CN-YunjianNeural
+- 女声-年轻: zh-CN-XiaoxiaoNeural
+- 女声-中年: zh-CN-XiaomengNeural
+- 旁白: zh-CN-YunyangNeural
+
+## BGM 类型
+suspense(悬疑), romantic(浪漫), tense(紧张), calm(平静), dramatic(戏剧性), happy(欢快)
+
+## JSON 输出格式
+
 {
   "title": "短剧标题",
   "characters": [
-    { "name": "角色名", "appearance": "角色外貌描述" }
+    { "name": "角色名", "description": "详细外貌描述，包含年龄、发型、穿着、体型等", "voiceId": "zh-CN-YunxiNeural" }
   ],
   "episodes": [
     {
       "episodeNumber": 1,
       "title": "第一集标题",
-      "narration": "旁白文本（用于 TTS 朗读）",
-      "sceneDescription": "画面描述（包含角色外貌、场景、构图、色调，用于 AI 图片生成。画风：${STYLE_IMAGE_PROMPT[style]}）",
-      "dialogues": [
-        { "character": "角色名", "line": "台词" }
-      ],
-      "duration": 30
+      "sceneDescription": "完整的场景描述（包含角色外貌+场景+光线+构图+画风：${STYLE_IMAGE_PROMPT[style]}），用于生成图片",
+      "shots": [
+        {
+          "shotNumber": 1,
+          "visual": "镜头画面描述（包含角色动作、表情、场景细节），用于生成该镜头的图片/视频",
+          "duration": 5,
+          "type": "narration",
+          "subtitle": "旁白或字幕文本",
+          "bgm": "suspense"
+        },
+        {
+          "shotNumber": 2,
+          "visual": "角色特写画面描述",
+          "duration": 3,
+          "type": "dialogue",
+          "character": "角色名（必须与 characters 中的一致）",
+          "line": "角色台词",
+          "voiceId": "zh-CN-YunxiNeural（使用该角色的 voiceId）"
+        },
+        {
+          "shotNumber": 3,
+          "visual": "另一角色画面描述",
+          "duration": 4,
+          "type": "dialogue",
+          "character": "另一角色名",
+          "line": "角色台词",
+          "voiceId": "zh-CN-XiaoxiaoNeural"
+        }
+      ]
     }
   ]
 }
 
-注意：
-- 共 ${episodeCount} 集
-- 题材为${GENRE_MAP[genre]}
-- 画风为${STYLE_MAP[style]}
-- sceneDescription 中必须包含角色外貌描述以保证角色一致性
-- sceneDescription 中必须包含"画风：${STYLE_IMAGE_PROMPT[style]}"的描述`;
+## 重要规则
+- characters 数组中的角色描述必须包含详细外貌（年龄、发型、五官、穿着、体型）
+- 每个 shot 的 visual 必须包含角色外貌描述，以保证图片生成的一致性
+- dialogue 类型的 shot 必须有 character（角色名）、line（台词）、voiceId（音色）
+- narration 类型的 shot 必须有 subtitle（字幕文本），不需要 voiceId
+- 同一角色在所有镜头中的 voiceId 必须一致
+- 每集至少 5-10 个 shots，总时长 30-60 秒
+- sceneDescription 中要包含完整的环境描述，画风：${STYLE_IMAGE_PROMPT[style]}`;
 
   const userPrompt = `请创作一部短剧。
 主题：${theme}
@@ -71,9 +124,9 @@ export async function generateScript(
 画风：${STYLE_MAP[style]}
 集数：${episodeCount} 集
 
-请确保剧情引人入胜，每集都有看点。`;
+请确保剧情引人入胜，每集都有冲突和悬念，角色对话自然有张力。`;
 
-  return chatCompletionJSON<GeneratedScript>(
+  return chatCompletionJSON<GeneratedScriptV2>(
     [
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
@@ -84,4 +137,51 @@ export async function generateScript(
 
 export function getStyleImagePrompt(style: DramaStyleType): string {
   return STYLE_IMAGE_PROMPT[style];
+}
+
+/**
+ * Extract narration text from v2 shots (for backward compatibility)
+ */
+export function extractNarrationFromShots(shots: Shot[]): string {
+  return shots
+    .map((shot) => {
+      if (shot.type === "dialogue" && shot.line) {
+        return `${shot.character}：${shot.line}`;
+      }
+      return shot.subtitle || "";
+    })
+    .filter(Boolean)
+    .join("。");
+}
+
+/**
+ * Extract scene description from v2 shots (first shot visual + sceneDescription)
+ */
+export function extractSceneFromEpisode(
+  episode: GeneratedEpisodeV2
+): string {
+  return episode.sceneDescription;
+}
+
+/**
+ * Assign consistent character voiceIds to all dialogue shots
+ */
+export function ensureConsistentVoiceIds(
+  characters: Character[],
+  shots: Shot[]
+): Shot[] {
+  const voiceMap = new Map<string, string>();
+  for (const c of characters) {
+    voiceMap.set(c.name, c.voiceId);
+  }
+
+  return shots.map((shot) => {
+    if (shot.type === "dialogue" && shot.character && !shot.voiceId) {
+      return {
+        ...shot,
+        voiceId: voiceMap.get(shot.character) || "zh-CN-YunxiNeural",
+      };
+    }
+    return shot;
+  });
 }
