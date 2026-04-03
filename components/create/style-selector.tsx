@@ -1,20 +1,21 @@
 "use client";
 
+import { Search, Heart, Laugh, Rocket, Ghost, Camera, Palette, Paintbrush, Cpu, type LucideIcon } from "lucide-react";
 import type { DramaGenreType, DramaStyleType } from "@/types/drama";
 
-const GENRES: { value: DramaGenreType; label: string; emoji: string; desc: string }[] = [
-  { value: "mystery", label: "悬疑", emoji: "🔍", desc: "烧脑反转" },
-  { value: "romance", label: "爱情", emoji: "💕", desc: "甜蜜心动" },
-  { value: "comedy", label: "喜剧", emoji: "😂", desc: "爆笑日常" },
-  { value: "scifi", label: "科幻", emoji: "🚀", desc: "未来科技" },
-  { value: "horror", label: "恐怖", emoji: "👻", desc: "惊悚刺激" },
+const GENRES: { value: DramaGenreType; label: string; icon: LucideIcon; desc: string }[] = [
+  { value: "mystery", label: "悬疑", icon: Search, desc: "烧脑反转" },
+  { value: "romance", label: "爱情", icon: Heart, desc: "甜蜜心动" },
+  { value: "comedy", label: "喜剧", icon: Laugh, desc: "爆笑日常" },
+  { value: "scifi", label: "科幻", icon: Rocket, desc: "未来科技" },
+  { value: "horror", label: "恐怖", icon: Ghost, desc: "惊悚刺激" },
 ];
 
-const STYLES: { value: DramaStyleType; label: string; emoji: string }[] = [
-  { value: "realistic", label: "写实", emoji: "📸" },
-  { value: "anime", label: "动漫", emoji: "🎨" },
-  { value: "ink", label: "水墨", emoji: "🖌️" },
-  { value: "cyberpunk", label: "赛博朋克", emoji: "🌃" },
+const STYLES: { value: DramaStyleType; label: string; icon: LucideIcon }[] = [
+  { value: "realistic", label: "写实", icon: Camera },
+  { value: "anime", label: "动漫", icon: Palette },
+  { value: "ink", label: "水墨", icon: Paintbrush },
+  { value: "cyberpunk", label: "赛博朋克", icon: Cpu },
 ];
 
 interface StyleSelectorProps {
@@ -34,7 +35,7 @@ export function StyleSelector({
     <div className="space-y-6">
       {/* Genre */}
       <div className="space-y-3">
-        <label className="text-sm font-medium">🎭 题材</label>
+        <label className="text-sm font-medium">题材</label>
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
           {GENRES.map((g) => (
             <button
@@ -46,7 +47,7 @@ export function StyleSelector({
                   : "border-border/50 hover:border-muted-foreground/50 bg-card/30"
               }`}
             >
-              <span className="text-2xl">{g.emoji}</span>
+              <g.icon className={`h-6 w-6 ${genre === g.value ? "text-emerald-400" : ""}`} />
               <span className="text-sm font-medium">{g.label}</span>
               <span className="text-xs text-muted-foreground">{g.desc}</span>
             </button>
@@ -56,7 +57,7 @@ export function StyleSelector({
 
       {/* Style */}
       <div className="space-y-3">
-        <label className="text-sm font-medium">🎨 画风</label>
+        <label className="text-sm font-medium">画风</label>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           {STYLES.map((s) => (
             <button
@@ -68,7 +69,7 @@ export function StyleSelector({
                   : "border-border/50 hover:border-muted-foreground/50 bg-card/30"
               }`}
             >
-              <span className="text-xl">{s.emoji}</span>
+              <s.icon className={`h-5 w-5 ${style === s.value ? "text-emerald-400" : ""}`} />
               <span className="text-sm font-medium">{s.label}</span>
             </button>
           ))}

@@ -64,6 +64,75 @@ interface ShotComposeInput {
   videoUrl?: string | null; // CogVideoX video if available
 }
 
+type KenBurnsEffect = "zoom-in" | "zoom-out" | "pan-left" | "pan-right" | "pan-up" | "pan-down" | "zoom-in-left" | "zoom-in-right" | "zoom-out-left" | "zoom-out-right";
+
+/**
+ * Pick a Ken Burns effect based on shot number for variety.
+ * Alternating between different movements across shots.
+ */
+function pickKenBurnsEffect(shotNumber: number): KenBurnsEffect {
+  const effects: KenBurnsEffect[] = [
+    "zoom-in", "pan-right", "zoom-out", "pan-left",
+    "zoom-in-right", "zoom-out-left", "pan-down",
+    "zoom-in-left", "pan-up", "zoom-out-right",
+  ];
+  return effects[(shotNumber - 1) % effects.length];
+}
+
+/**
+ * Build zoompan filter string for a given Ken Burns effect.
+ * Returns the zoompan filter expression and the scale+framerate prepended.
+ */
+function buildKenBurnsFilter(effect: KenBurnsEffect, totalFrames: number): string {
+  // Base scale to 1280x720, ensure image covers the frame
+  const scale = "scale=1280:720";
+
+  switch (effect) {
+    case "zoom-in":
+      // Slow zoom in from center
+      return `${scale},zoompan=z='min(zoom+0.002,1.5)':d=${totalFrames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1280x720`;
+
+    case "zoom-out":
+      // Start zoomed in, slowly pull back
+      return `${scale},zoompan=z='if(eq(on,1),1.4,max(zoom-0.002,1.0))':d=${totalFrames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1280x720`;
+
+    case "pan-left":
+      // Pan from right to left while slightly zooming
+      return `${scale},zoompan=z='min(zoom+0.001,1.3)':d=${totalFrames}:x='iw-iw/zoom-(on*(iw-iw/zoom)/${totalFrames})':y='ih/2-(ih/zoom/2)':s=1280x720`;
+
+    case "pan-right":
+      // Pan from left to right while slightly zooming
+      return `${scale},zoompan=z='min(zoom+0.001,1.3)':d=${totalFrames}:x='(on*(iw-iw/zoom)/${totalFrames})':y='ih/2-(ih/zoom/2)':s=1280x720`;
+
+    case "pan-up":
+      // Pan from bottom to top
+      return `${scale},zoompan=z='min(zoom+0.001,1.3)':d=${totalFrames}:x='iw/2-(iw/zoom/2)':y='ih-ih/zoom-(on*(ih-ih/zoom)/${totalFrames})':s=1280x720`;
+
+    case "pan-down":
+      // Pan from top to bottom
+      return `${scale},zoompan=z='min(zoom+0.001,1.3)':d=${totalFrames}:x='iw/2-(iw/zoom/2)':y='(on*(ih-ih/zoom)/${totalFrames})':s=1280x720`;
+
+    case "zoom-in-left":
+      // Zoom in focusing on left third
+      return `${scale},zoompan=z='min(zoom+0.002,1.4)':d=${totalFrames}:x='iw/3-(iw/zoom/3)':y='ih/2-(ih/zoom/2)':s=1280x720`;
+
+    case "zoom-in-right":
+      // Zoom in focusing on right third
+      return `${scale},zoompan=z='min(zoom+0.002,1.4)':d=${totalFrames}:x='2*iw/3-(iw/zoom/3)':y='ih/2-(ih/zoom/2)':s=1280x720`;
+
+    case "zoom-out-left":
+      // Start zoomed on left, pull back to center
+      return `${scale},zoompan=z='if(eq(on,1),1.4,max(zoom-0.002,1.0))':d=${totalFrames}:x='iw/3-(iw/zoom/3)':y='ih/2-(ih/zoom/2)':s=1280x720`;
+
+    case "zoom-out-right":
+      // Start zoomed on right, pull back to center
+      return `${scale},zoompan=z='if(eq(on,1),1.4,max(zoom-0.002,1.0))':d=${totalFrames}:x='2*iw/3-(iw/zoom/3)':y='ih/2-(ih/zoom/2)':s=1280x720`;
+
+    default:
+      return `${scale},zoompan=z='min(zoom+0.002,1.5)':d=${totalFrames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1280x720`;
+  }
+}
+
 /**
  * Compose a single shot into a video clip (without subtitles).
  * Subtitles are burned into the final video after concatenation for perfect timing.
@@ -83,17 +152,18 @@ async function composeShotVideo(
     return outputPath;
   }
 
-  // Otherwise: image + Ken Burns + audio
+  // Otherwise: image + Ken Burns + audio (with varied effects per shot)
   if (input.imageUrl) {
     const durationMs = Math.round(shotAudio.duration * 1000);
     const zoompanDuration = Math.max(1, Math.ceil(shotAudio.duration * 25)); // d is in frames (25fps)
 
-    const vfFilters = [
-      `scale=1280:720`,
-      `zoompan=z='min(zoom+0.0015,1.5)':d=${zoompanDuration}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1280x720`,
-    ];
+    const effect = pickKenBurnsEffect(shot.shotNumber);
+    const kenBurnsFilter = buildKenBurnsFilter(effect, zoompanDuration);
 
-    const filterComplex = `[0:v]${vfFilters.join(",")}[v];[1:a]anull[a]`;
+    // Fade in/out for smooth transitions between shots
+    const fadeDuration = Math.min(0.5, shotAudio.duration * 0.15);
+
+    const filterComplex = `[0:v]${kenBurnsFilter},fade=t=in:st=0:d=${fadeDuration},fade=t=out:st=${shotAudio.duration - fadeDuration}:d=${fadeDuration}[v];[1:a]anull[a]`;
     const cmd = `ffmpeg -loop 1 -i "${input.imageUrl}" -i "${shotAudio.audioUrl}" -filter_complex "${filterComplex}" -map "[v]" -map "[a]" -c:v libx264 -t ${shotAudio.duration} -pix_fmt yuv420p -shortest -y "${outputPath}"`;
     await execAsync(cmd, { timeout: 120000 });
     return outputPath;

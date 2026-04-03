@@ -7,7 +7,7 @@ import { StepIndicator } from "@/components/create/step-indicator";
 import { VoiceoverPanel } from "@/components/drama/voiceover-panel";
 import { VideoPreview } from "@/components/drama/video-preview";
 import { ExportDialog } from "@/components/drama/export-dialog";
-import { Loader2, ArrowLeft, Film } from "lucide-react";
+import { Loader2, ArrowLeft, Film, Check } from "lucide-react";
 import Link from "next/link";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
@@ -282,9 +282,9 @@ export default function PreviewPageContent() {
 
         <Tabs defaultValue="preview" className="space-y-6">
           <TabsList className="bg-muted/30">
-            <TabsTrigger value="preview">📹 视频预览</TabsTrigger>
-            <TabsTrigger value="voiceover">🎙️ 配音管理</TabsTrigger>
-            <TabsTrigger value="compose">🎬 合成视频</TabsTrigger>
+            <TabsTrigger value="preview" className="inline-flex items-center gap-1.5">📹 视频预览</TabsTrigger>
+            <TabsTrigger value="voiceover" className="inline-flex items-center gap-1.5">🎙️ 配音管理</TabsTrigger>
+            <TabsTrigger value="compose" className="inline-flex items-center gap-1.5">🎬 合成视频</TabsTrigger>
           </TabsList>
 
           <TabsContent value="preview">
@@ -330,7 +330,7 @@ export default function PreviewPageContent() {
                       <span className="text-xs text-muted-foreground">分镜</span>
                       <span className={`w-3 h-3 rounded-full ${ep.videoUrl ? "bg-emerald-500" : "bg-zinc-600"}`} />
                       <span className="text-xs text-muted-foreground">AI视频</span>
-                      {ep.videoUrl && <span className="text-xs text-emerald-400">✓ 已生成</span>}
+                      {ep.videoUrl && <span className="text-xs text-emerald-400 inline-flex items-center gap-0.5"><Check className="h-3 w-3 text-emerald-400" /> 已生成</span>}
                     </div>
                   ))}
                 </div>

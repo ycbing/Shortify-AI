@@ -12,7 +12,7 @@ export function DramaCardGrid({ dramas, emptyMessage = "还没有短剧" }: Dram
   if (dramas.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center">
-        <span className="text-6xl mb-4">🎬</span>
+        <span className="text-5xl mb-4">🎬</span>
         <h3 className="text-lg font-semibold mb-2">{emptyMessage}</h3>
         <p className="text-sm text-muted-foreground">
           点击「创建短剧」开始你的创作之旅

@@ -14,6 +14,9 @@ import {
   Mic,
   MessageCircle,
   Music,
+  FileText,
+  Palette,
+  Clapperboard,
 } from "lucide-react";
 import type {
   Character,
@@ -132,8 +135,9 @@ function ShotTimeline({ shots }: ShotTimelineProps) {
                 </div>
               )}
               {shot.subtitle && shot.type !== "dialogue" && (
-                <p className="text-xs text-muted-foreground italic">
-                  📝 {shot.subtitle}
+                <p className="text-xs text-muted-foreground italic inline-flex items-center gap-1">
+                  <FileText className="h-3 w-3 shrink-0" />
+                  {shot.subtitle}
                 </p>
               )}
             </div>
@@ -238,8 +242,9 @@ function ScriptEditorV1({
           {expandedEpisodes.has(index) && (
             <div className="px-4 pb-4 space-y-4 border-t border-border/30">
               <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
-                  🎙️ 旁白
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 inline-flex items-center gap-1 block">
+                  <Mic className="h-3 w-3 text-muted-foreground" />
+                  旁白
                 </label>
                 {editable ? (
                   <Textarea
@@ -256,8 +261,9 @@ function ScriptEditorV1({
               </div>
 
               <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
-                  🎨 场景描述
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 inline-flex items-center gap-1 block">
+                  <Palette className="h-3 w-3 text-muted-foreground" />
+                  场景描述
                 </label>
                 {editable ? (
                   <Textarea
@@ -280,8 +286,9 @@ function ScriptEditorV1({
 
               {episode.dialogues.length > 0 && (
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
-                    💬 对话
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 inline-flex items-center gap-1 block">
+                    <MessageCircle className="h-3 w-3 text-muted-foreground" />
+                    对话
                   </label>
                   <div className="space-y-2">
                     {episode.dialogues.map((d, di) => (
@@ -417,8 +424,9 @@ function ScriptEditorV2({
               <div className="px-4 pb-4 space-y-4 border-t border-border/30">
                 {/* Scene description */}
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
-                    🎨 场景描述
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 inline-flex items-center gap-1 block">
+                    <Palette className="h-3 w-3 text-muted-foreground" />
+                    场景描述
                   </label>
                   <p className="text-sm bg-muted/30 rounded p-3">
                     {episode.sceneDescription}
@@ -427,8 +435,9 @@ function ScriptEditorV2({
 
                 {/* Shot timeline */}
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
-                    🎬 镜头时间线
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 inline-flex items-center gap-1 block">
+                    <Clapperboard className="h-3 w-3 text-muted-foreground" />
+                    镜头时间线
                   </label>
                   <ShotTimeline shots={episode.shots} />
                 </div>

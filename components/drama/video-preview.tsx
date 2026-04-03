@@ -1,7 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { Play, Pause, SkipBack, SkipForward, Maximize } from "lucide-react";
+import { Play, Pause, SkipBack, SkipForward, Maximize, FileText } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 
 interface EpisodeData {
@@ -169,7 +169,7 @@ export function VideoPreview({ videoUrl, episodes = [] }: VideoPreviewProps) {
           />
         ) : (
           <div className="text-center">
-            <span className="text-4xl mb-2 block">🎬</span>
+            <span className="text-5xl mx-auto mb-2">🎬</span>
             <p className="text-sm text-muted-foreground">暂无预览</p>
           </div>
         )}
@@ -190,8 +190,9 @@ export function VideoPreview({ videoUrl, episodes = [] }: VideoPreviewProps) {
 
         {/* Subtitle badge */}
         {currentSubtitleUrl && (
-          <div className="absolute top-2 right-2 text-xs text-blue-400 bg-black/50 px-2 py-1 rounded">
-            📝 字幕
+          <div className="absolute top-2 right-2 text-xs text-blue-400 bg-black/50 px-2 py-1 rounded inline-flex items-center gap-1">
+            <FileText className="h-3 w-3 text-blue-400" />
+            字幕
           </div>
         )}
       </div>

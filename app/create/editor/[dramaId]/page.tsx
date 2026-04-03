@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Loader2, Save, ArrowLeft, GripVertical } from "lucide-react";
+import { Loader2, Save, ArrowLeft, GripVertical, Check, Circle } from "lucide-react";
 import Link from "next/link";
 
 interface Episode {
@@ -162,11 +162,11 @@ export default function EditorPage() {
               <div className="flex-1 min-w-0">
                 <p className="font-medium text-sm truncate">{ep.title || `第${ep.episodeNumber}集`}</p>
                 <div className="flex gap-2 mt-1">
-                  <span className={`text-xs ${ep.voiceoverUrl ? "text-emerald-400" : "text-muted-foreground"}`}>
-                    {ep.voiceoverUrl ? "✓ 配音" : "○ 配音"}
+                  <span className={`text-xs ${ep.voiceoverUrl ? "text-emerald-400" : "text-muted-foreground"} inline-flex items-center gap-0.5`}>
+                    {ep.voiceoverUrl ? <><Check className="h-3 w-3" /> 配音</> : <><Circle className="h-2 w-2" /> 配音</>}
                   </span>
-                  <span className={`text-xs ${ep.videoUrl ? "text-emerald-400" : "text-muted-foreground"}`}>
-                    {ep.videoUrl ? "✓ 视频" : "○ 视频"}
+                  <span className={`text-xs ${ep.videoUrl ? "text-emerald-400" : "text-muted-foreground"} inline-flex items-center gap-0.5`}>
+                    {ep.videoUrl ? <><Check className="h-3 w-3" /> 视频</> : <><Circle className="h-2 w-2" /> 视频</>}
                   </span>
                 </div>
               </div>

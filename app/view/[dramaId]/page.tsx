@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { VideoPreview } from "@/components/drama/video-preview";
 import { ExportDialog } from "@/components/drama/export-dialog";
-import { Loader2, ArrowLeft, Edit3 } from "lucide-react";
+import { Loader2, ArrowLeft, Edit3, Check } from "lucide-react";
 import Link from "next/link";
 
 interface DramaData {
@@ -223,8 +223,8 @@ export default function ViewDramaPage() {
                     <p className="text-sm font-medium">EP{ep.episodeNumber} - {ep.title || "未命名"}</p>
                     <p className="text-xs text-muted-foreground mt-1">
                       {ep.duration ? `${ep.duration}s` : ""}
-                      {ep.videoUrl ? " · ✓ 视频" : ""}
-                      {ep.voiceoverUrl ? " · ✓ 配音" : ""}
+                      {ep.videoUrl ? " · " : ""}{ep.videoUrl && <span className="inline-flex items-center gap-0.5"><Check className="h-3 w-3 text-emerald-400" /> 视频</span>}
+                      {ep.voiceoverUrl ? " · " : ""}{ep.voiceoverUrl && <span className="inline-flex items-center gap-0.5"><Check className="h-3 w-3 text-emerald-400" /> 配音</span>}
                     </p>
                   </div>
                 </div>

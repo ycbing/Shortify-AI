@@ -2,6 +2,7 @@
 
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { PenLine } from "lucide-react";
 
 interface ThemeInputProps {
   value: string;
@@ -11,8 +12,9 @@ interface ThemeInputProps {
 export function ThemeInput({ value, onChange }: ThemeInputProps) {
   return (
     <div className="space-y-2">
-      <Label htmlFor="theme" className="text-sm font-medium">
-        📝 创意主题
+      <Label htmlFor="theme" className="text-sm font-medium inline-flex items-center gap-1">
+        <PenLine className="h-4 w-4 text-emerald-400" />
+        创意主题
       </Label>
       <Textarea
         id="theme"
