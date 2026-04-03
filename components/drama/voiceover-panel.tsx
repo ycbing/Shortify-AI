@@ -2,7 +2,7 @@
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Play, Pause, Volume2, RefreshCw } from "lucide-react";
+import { Play, Pause, Volume2, RefreshCw, Loader2 } from "lucide-react";
 import { useState, useRef } from "react";
 
 interface VoiceoverItem {
@@ -55,10 +55,19 @@ export function VoiceoverPanel({
           <Button
             onClick={onGenerateAll}
             disabled={loading}
-            className="bg-emerald-600 hover:bg-emerald-500"
+            className="bg-emerald-600 hover:bg-emerald-500 min-h-[44px]"
           >
-            <Volume2 className="h-4 w-4 mr-2" />
-            {loading ? "生成中..." : "全部生成配音"}
+            {loading ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                生成中...
+              </>
+            ) : (
+              <>
+                <Volume2 className="h-4 w-4 mr-2" />
+                全部生成配音
+              </>
+            )}
           </Button>
         )}
       </div>
@@ -66,14 +75,14 @@ export function VoiceoverPanel({
       {items.map((item) => (
         <div
           key={item.episodeNumber}
-          className="flex items-center gap-4 p-3 border border-border/50 rounded-lg bg-card/50"
+          className="flex items-center gap-2 sm:gap-4 p-2.5 sm:p-3 border border-border/50 rounded-lg bg-card/50"
         >
-          <Badge variant="outline" className="shrink-0 bg-emerald-500/10 text-emerald-400 border-emerald-500/30">
+          <Badge variant="outline" className="shrink-0 bg-emerald-500/10 text-emerald-400 border-emerald-500/30 text-xs">
             EP{item.episodeNumber}
           </Badge>
 
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate">{item.title}</p>
+            <p className="text-xs sm:text-sm font-medium truncate">{item.title}</p>
             <p className="text-xs text-muted-foreground">
               {item.voiceoverUrl
                 ? `已生成 · ${item.duration || "?"}s`
@@ -81,17 +90,18 @@ export function VoiceoverPanel({
             </p>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             {item.voiceoverUrl ? (
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => handlePlay(item.episodeNumber, item.voiceoverUrl!)}
+                className="min-h-[40px] min-w-[40px] px-2 sm:px-3"
               >
                 {playingEpisode === item.episodeNumber ? (
-                  <Pause className="h-3 w-3" />
+                  <Pause className="h-3.5 w-3.5" />
                 ) : (
-                  <Play className="h-3 w-3" />
+                  <Play className="h-3.5 w-3.5" />
                 )}
               </Button>
             ) : (
@@ -100,9 +110,10 @@ export function VoiceoverPanel({
                 size="sm"
                 disabled={loading}
                 onClick={() => onGenerate?.(item.episodeNumber)}
+                className="min-h-[40px] min-w-[40px] px-2 sm:px-3 text-xs sm:text-sm"
               >
-                <Volume2 className="h-3 w-3 mr-1" />
-                生成
+                <Volume2 className="h-3.5 w-3.5 mr-1" />
+                <span className="hidden sm:inline">生成</span>
               </Button>
             )}
             {item.voiceoverUrl && onGenerate && (
@@ -111,8 +122,9 @@ export function VoiceoverPanel({
                 size="sm"
                 disabled={loading}
                 onClick={() => onGenerate(item.episodeNumber)}
+                className="min-h-[40px] min-w-[40px] px-2"
               >
-                <RefreshCw className="h-3 w-3" />
+                <RefreshCw className="h-3.5 w-3.5" />
               </Button>
             )}
           </div>

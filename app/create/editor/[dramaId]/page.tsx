@@ -101,17 +101,16 @@ export default function EditorPage() {
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b border-border/50 bg-background/80 backdrop-blur-xl sticky top-0 z-40">
-        <div className="mx-auto max-w-4xl flex items-center justify-between px-4 h-16">
-          <div className="flex items-center gap-4">
+        <div className="mx-auto max-w-4xl flex items-center justify-between px-4 h-14 sm:h-16">
+          <div className="flex items-center gap-2 sm:gap-4 min-w-0">
             <Link href="/dashboard">
-              <Button variant="ghost" size="sm">
-                <ArrowLeft className="h-4 w-4 mr-2" />
-                返回
+              <Button variant="ghost" size="sm" className="min-h-[44px] min-w-[44px]">
+                <ArrowLeft className="h-4 w-4" />
               </Button>
             </Link>
-            <h1 className="text-lg font-bold">编辑器</h1>
+            <h1 className="text-base sm:text-lg font-bold truncate">编辑器</h1>
           </div>
-          <Button onClick={handleSave} disabled={saving} className="bg-emerald-600 hover:bg-emerald-500">
+          <Button onClick={handleSave} disabled={saving} className="bg-emerald-600 hover:bg-emerald-500 min-h-[44px]">
             {saving ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -127,12 +126,12 @@ export default function EditorPage() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-4xl px-4 py-6">
-        <p className="text-sm text-muted-foreground mb-6">
+      <main className="mx-auto max-w-4xl px-4 py-4 sm:py-6">
+        <p className="text-xs sm:text-sm text-muted-foreground mb-4 sm:mb-6">
           拖拽调整剧集顺序
         </p>
 
-        <div className="space-y-3">
+        <div className="space-y-2 sm:space-y-3">
           {episodes.map((ep, index) => (
             <div
               key={ep.id}
@@ -140,17 +139,17 @@ export default function EditorPage() {
               onDragStart={() => handleDragStart(index)}
               onDragOver={(e) => e.preventDefault()}
               onDrop={() => handleDrop(index)}
-              className={`flex items-center gap-4 p-4 border rounded-lg bg-card/50 cursor-grab active:cursor-grabbing transition-all ${
+              className={`flex items-center gap-3 sm:gap-4 p-3 sm:p-4 border rounded-lg bg-card/50 cursor-grab active:cursor-grabbing transition-all ${
                 dragIndex === index
                   ? "border-emerald-500 opacity-50"
                   : "border-border/50 hover:border-muted-foreground/50"
               }`}
             >
               <GripVertical className="h-5 w-5 text-muted-foreground shrink-0" />
-              <span className="text-lg font-bold text-muted-foreground w-8 text-center">
+              <span className="text-base sm:text-lg font-bold text-muted-foreground w-6 sm:w-8 text-center shrink-0">
                 {ep.episodeNumber}
               </span>
-              <div className="aspect-video w-32 bg-muted rounded overflow-hidden shrink-0">
+              <div className="aspect-video w-20 sm:w-32 bg-muted rounded overflow-hidden shrink-0">
                 {ep.imageUrl ? (
                   <img src={ep.imageUrl} alt={ep.title || ""} className="w-full h-full object-cover" />
                 ) : (
@@ -160,7 +159,7 @@ export default function EditorPage() {
                 )}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="font-medium text-sm truncate">{ep.title || `第${ep.episodeNumber}集`}</p>
+                <p className="font-medium text-xs sm:text-sm truncate">{ep.title || `第${ep.episodeNumber}集`}</p>
                 <div className="flex gap-2 mt-1">
                   <span className={`text-xs ${ep.voiceoverUrl ? "text-emerald-400" : "text-muted-foreground"} inline-flex items-center gap-0.5`}>
                     {ep.voiceoverUrl ? <><Check className="h-3 w-3" /> 配音</> : <><Circle className="h-2 w-2" /> 配音</>}

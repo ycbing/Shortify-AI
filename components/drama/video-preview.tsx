@@ -34,7 +34,6 @@ export function VideoPreview({ videoUrl, episodes = [] }: VideoPreviewProps) {
 
   const currentEp = episodes[currentEpisode];
   const currentVideoUrl = currentEp?.videoUrl || videoUrl;
-  // subtitleUrl may still be a local path from the API, convert it
   const currentSubtitleUrl = currentEp?.subtitleUrl
     ? currentEp.subtitleUrl.startsWith("/api/") ? currentEp.subtitleUrl : toPublicUrl(currentEp.subtitleUrl)
     : null;
@@ -141,7 +140,7 @@ export function VideoPreview({ videoUrl, episodes = [] }: VideoPreviewProps) {
       {/* Hidden elements for ref-based control */}
       <audio ref={audioRef} />
 
-      {/* Video or slideshow display */}
+      {/* Video or slideshow display — full width on mobile */}
       <div className="aspect-video relative bg-muted flex items-center justify-center">
         {currentVideoUrl ? (
           <video
@@ -169,7 +168,7 @@ export function VideoPreview({ videoUrl, episodes = [] }: VideoPreviewProps) {
           />
         ) : (
           <div className="text-center">
-            <span className="text-5xl mx-auto mb-2">🎬</span>
+            <span className="text-4xl sm:text-5xl mx-auto mb-2">🎬</span>
             <p className="text-sm text-muted-foreground">暂无预览</p>
           </div>
         )}
@@ -197,25 +196,42 @@ export function VideoPreview({ videoUrl, episodes = [] }: VideoPreviewProps) {
         )}
       </div>
 
-      {/* Custom controls (only in slideshow mode) */}
+      {/* Custom controls — larger touch targets on mobile */}
       {!currentVideoUrl && (
-        <div className="flex items-center justify-center gap-2 p-3 bg-card">
-          <Button variant="ghost" size="sm" onClick={handlePrev} disabled={currentEpisode === 0}>
-            <SkipBack className="h-4 w-4" />
+        <div className="flex items-center justify-center gap-1 sm:gap-2 p-2 sm:p-3 bg-card">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handlePrev}
+            disabled={currentEpisode === 0}
+            className="min-h-[44px] min-w-[44px]"
+          >
+            <SkipBack className="h-5 w-5" />
           </Button>
           <Button
             variant="outline"
             size="sm"
             onClick={handlePlayPause}
-            className="bg-emerald-600 hover:bg-emerald-500 border-emerald-600"
+            className="bg-emerald-600 hover:bg-emerald-500 border-emerald-600 min-h-[44px] min-w-[44px] px-4"
           >
-            {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+            {playing ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
           </Button>
-          <Button variant="ghost" size="sm" onClick={handleNext} disabled={currentEpisode === episodes.length - 1}>
-            <SkipForward className="h-4 w-4" />
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleNext}
+            disabled={currentEpisode === episodes.length - 1}
+            className="min-h-[44px] min-w-[44px]"
+          >
+            <SkipForward className="h-5 w-5" />
           </Button>
-          <Button variant="ghost" size="sm" onClick={toggleFullscreen}>
-            <Maximize className="h-4 w-4" />
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={toggleFullscreen}
+            className="min-h-[44px] min-w-[44px]"
+          >
+            <Maximize className="h-5 w-5" />
           </Button>
         </div>
       )}

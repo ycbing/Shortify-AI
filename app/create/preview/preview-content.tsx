@@ -7,9 +7,10 @@ import { StepIndicator } from "@/components/create/step-indicator";
 import { VoiceoverPanel } from "@/components/drama/voiceover-panel";
 import { VideoPreview } from "@/components/drama/video-preview";
 import { ExportDialog } from "@/components/drama/export-dialog";
-import { Loader2, ArrowLeft, Film, Check } from "lucide-react";
+import { Loader2, ArrowLeft, Film, Check, AlertCircle } from "lucide-react";
 import Link from "next/link";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { toast } from "sonner";
 
 const steps = [
   { number: 1, title: "创意" },
@@ -32,11 +33,10 @@ interface EpisodeData {
 /** Convert a local upload path or COS URL to an accessible URL */
 function toPublicUrl(localPath: string | null): string | null {
   if (!localPath) return null;
-  // COS URL -> proxy through /api/uploads/cos/ for signed access
   if (localPath.includes(".cos.") && localPath.startsWith("http")) {
     try {
       const url = new URL(localPath);
-      const cosKey = url.pathname.slice(1); // remove leading /
+      const cosKey = url.pathname.slice(1);
       return `/api/uploads/cos/${encodeURIComponent(cosKey)}`;
     } catch {
       return localPath;
@@ -53,8 +53,10 @@ export default function PreviewPageContent() {
 
   const [episodes, setEpisodes] = useState<EpisodeData[]>([]);
   const [mergedVideoUrl, setMergedVideoUrl] = useState<string | null>(null);
+  const [dramaTitle, setDramaTitle] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [loadingAction, setLoadingAction] = useState("");
+  const [actionProgress, setActionProgress] = useState({ current: 0, total: 0 });
   const [error, setError] = useState("");
 
   const fetchEpisodes = useCallback(async () => {
@@ -65,7 +67,7 @@ export default function PreviewPageContent() {
       const res = await fetch(`/api/dramas/${dramaId}`);
       if (res.ok) {
         const data = await res.json();
-        // 将本地路径转为可访问的 URL
+        setDramaTitle(data.title || "");
         const processedEpisodes = (data.episodes || []).map((ep: EpisodeData) => ({
           ...ep,
           voiceoverUrl: toPublicUrl(ep.voiceoverUrl),
@@ -74,9 +76,12 @@ export default function PreviewPageContent() {
           subtitleUrl: toPublicUrl(ep.subtitleUrl),
         }));
         setEpisodes(processedEpisodes);
+      } else {
+        toast.error("加载短剧数据失败");
       }
     } catch {
       setError("加载失败");
+      toast.error("网络错误，请刷新页面重试");
     } finally {
       setLoading(false);
     }
@@ -93,21 +98,44 @@ export default function PreviewPageContent() {
   const handleGenerateAllVoiceovers = async () => {
     if (!dramaId) return;
     setLoadingAction("voiceover");
+    const episodesToProcess = episodes.filter((ep) => !ep.voiceoverUrl);
+    const total = episodesToProcess.length || episodes.length;
 
-    try {
-      const res = await fetch("/api/generate/voiceover", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dramaId }),
-      });
+    for (let i = 0; i < episodes.length; i++) {
+      if (episodesToProcess.length > 0 && episodes[i].voiceoverUrl) continue;
+      setActionProgress({ current: i + 1, total });
+      setLoadingAction(`voiceover-${i + 1}`);
 
-      if (res.ok) {
-        await fetchEpisodes();
+      try {
+        const res = await fetch("/api/generate/voiceover", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ dramaId, episodeId: episodes[i].id }),
+        });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          const errMsg = errData.error || `第 ${episodes[i].episodeNumber} 集配音生成失败`;
+          setError(errMsg);
+          toast.error(errMsg);
+          if (errData.code === "INSUFFICIENT_CREDITS") {
+            toast.error("积分不足，请前往设置页面充值", { duration: 5000 });
+          }
+          break;
+        }
+      } catch {
+        const msg = `第 ${episodes[i].episodeNumber} 集配音生成失败`;
+        setError(msg);
+        toast.error(msg);
+        break;
       }
-    } catch {
-      setError("配音生成失败");
-    } finally {
-      setLoadingAction("");
+    }
+
+    await fetchEpisodes();
+    setLoadingAction("");
+    setActionProgress({ current: 0, total: 0 });
+
+    if (!error) {
+      toast.success("配音生成完成");
     }
   };
 
@@ -130,9 +158,17 @@ export default function PreviewPageContent() {
 
       if (res.ok) {
         await fetchEpisodes();
+        toast.success(`第 ${ep.episodeNumber} 集配音生成完成`);
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        const errMsg = errData.error || "配音生成失败";
+        toast.error(errMsg);
+        if (errData.code === "INSUFFICIENT_CREDITS") {
+          toast.error("积分不足，请前往设置页面充值", { duration: 5000 });
+        }
       }
     } catch {
-      // ignore
+      toast.error("网络错误，请重试");
     } finally {
       setLoadingAction("");
     }
@@ -141,6 +177,8 @@ export default function PreviewPageContent() {
   const handleComposeAll = async () => {
     if (!dramaId) return;
     setLoadingAction("compose");
+    setActionProgress({ current: 0, total: episodes.length });
+    setError("");
 
     try {
       const res = await fetch("/api/compose", {
@@ -152,20 +190,32 @@ export default function PreviewPageContent() {
       if (res.ok) {
         const data = await res.json();
         if (data.mergedUrl) {
-          setMergedVideoUrl(data.mergedUrl);
+          setMergedVideoUrl(toPublicUrl(data.mergedUrl));
         }
         await fetchEpisodes();
+        toast.success(`视频合成完成，共 ${data.videoCount || episodes.length} 集`);
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        const errMsg = errData.error || "视频合成失败";
+        setError(errMsg);
+        toast.error(errMsg);
+        if (errData.code === "INSUFFICIENT_CREDITS") {
+          toast.error("积分不足，请前往设置页面充值", { duration: 5000 });
+        }
       }
     } catch {
       setError("视频合成失败");
+      toast.error("网络错误，请重试");
     } finally {
       setLoadingAction("");
+      setActionProgress({ current: 0, total: 0 });
     }
   };
 
   const handleGenerateVideos = async () => {
     if (!dramaId) return;
     setLoadingAction("video-gen");
+    setError("");
 
     try {
       const res = await fetch("/api/generate/video", {
@@ -176,13 +226,20 @@ export default function PreviewPageContent() {
 
       if (res.ok) {
         const data = await res.json();
-        // 轮询检查视频生成进度
+        toast.success(data.message || "AI 视频生成已启动");
         pollVideoProgress();
       } else {
-        setError("视频生成启动失败");
+        const errData = await res.json().catch(() => ({}));
+        const errMsg = errData.error || "视频生成启动失败";
+        setError(errMsg);
+        toast.error(errMsg);
+        if (errData.code === "INSUFFICIENT_CREDITS") {
+          toast.error("积分不足，请前往设置页面充值", { duration: 5000 });
+        }
       }
     } catch {
       setError("视频生成失败");
+      toast.error("网络错误，请重试");
     } finally {
       setLoadingAction("");
     }
@@ -190,41 +247,27 @@ export default function PreviewPageContent() {
 
   const pollVideoProgress = async () => {
     if (!dramaId) return;
-    const maxAttempts = 60; // 最多轮询 5 分钟
+    const maxAttempts = 60;
     let attempts = 0;
 
     const poll = async () => {
       attempts++;
       await fetchEpisodes();
 
+      const completed = episodes.filter((ep) => ep.videoUrl).length;
+      setActionProgress({ current: completed, total: episodes.length });
+
       const allDone = episodes.every((ep) => ep.videoUrl);
       if (allDone || attempts >= maxAttempts) {
         setLoadingAction("");
+        setActionProgress({ current: 0, total: 0 });
         return;
       }
 
       setTimeout(poll, 5000);
     };
 
-    setTimeout(poll, 10000); // 首次等待 10 秒
-  };
-
-  const handleExport = async (format: string, _resolution: string) => {
-    if (!dramaId) return;
-
-    try {
-      const res = await fetch(`/api/dramas/${dramaId}/export`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ format }),
-      });
-
-      if (res.ok) {
-        alert("导出成功！");
-      }
-    } catch {
-      setError("导出失败");
-    }
+    setTimeout(poll, 10000);
   };
 
   if (loading) {
@@ -242,52 +285,105 @@ export default function PreviewPageContent() {
     duration: ep.duration,
   }));
 
+  const getActionLabel = () => {
+    if (loadingAction.startsWith("voiceover")) {
+      const isSingle = loadingAction.includes("-");
+      return isSingle
+        ? `正在生成第 ${actionProgress.current}/${actionProgress.total} 集配音...`
+        : "正在生成配音...";
+    }
+    if (loadingAction === "compose") {
+      return actionProgress.total > 0
+        ? `正在合成第 ${actionProgress.current}/${actionProgress.total} 集...`
+        : "正在合成视频...";
+    }
+    if (loadingAction === "video-gen") {
+      return actionProgress.total > 0
+        ? `AI 视频生成中... (${actionProgress.current}/${actionProgress.total} 集已完成)`
+        : "AI 视频生成中...";
+    }
+    return "处理中...";
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b border-border/50 bg-background/80 backdrop-blur-xl sticky top-0 z-40">
-        <div className="mx-auto max-w-6xl flex items-center justify-between px-4 h-16">
+        <div className="mx-auto max-w-6xl flex items-center justify-between px-4 h-14 sm:h-16 gap-2">
           <StepIndicator currentStep={4} steps={steps} />
-          <ExportDialog
-            dramaId={dramaId!}
-            episodeCount={episodes.length}
-            onExport={handleExport}
-          />
+          {dramaId && (
+            <ExportDialog
+              dramaId={dramaId}
+              dramaTitle={dramaTitle}
+              episodeCount={episodes.length}
+            />
+          )}
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-4 py-10">
-        <div className="mb-8">
-          <h1 className="text-2xl font-bold mb-2">预览与导出 🎬</h1>
-          <p className="text-muted-foreground">为你的短剧生成配音、合成视频</p>
+      <main className="mx-auto max-w-6xl px-4 py-8 sm:py-10">
+        {/* Step hint */}
+        <div className="mb-6 sm:mb-8 p-3 sm:p-4 rounded-lg bg-emerald-500/5 border border-emerald-500/20">
+          <p className="text-xs sm:text-sm text-emerald-400">
+            🎬 生成配音、合成视频、导出你的作品
+          </p>
+        </div>
+
+        <div className="mb-6 sm:mb-8">
+          <h1 className="text-xl sm:text-2xl font-bold mb-1">预览与导出 🎬</h1>
+          <p className="text-xs sm:text-sm text-muted-foreground">为你的短剧生成配音、合成视频</p>
         </div>
 
         {error && (
-          <div className="mb-6 text-sm text-red-400 bg-red-500/10 rounded p-3">{error}</div>
-        )}
-
-        {loadingAction && (
-          <div className="mb-6 p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-lg">
-            <div className="flex items-center gap-3">
-              <Loader2 className="h-5 w-5 animate-spin text-emerald-400" />
-              <p className="text-sm text-emerald-400">
-                {loadingAction === "voiceover"
-                  ? "正在生成配音..."
-                  : loadingAction === "compose"
-                  ? "正在合成视频..."
-                  : "处理中..."}
-              </p>
-            </div>
+          <div
+            className="mb-6 text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg p-3 flex items-start gap-2 cursor-pointer"
+            onClick={() => setError("")}
+            role="alert"
+          >
+            <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+            <span className="flex-1">{error}</span>
+            <span className="text-xs text-red-400/60 shrink-0">点击关闭</span>
           </div>
         )}
 
-        <Tabs defaultValue="preview" className="space-y-6">
-          <TabsList className="bg-muted/30">
-            <TabsTrigger value="preview" className="inline-flex items-center gap-1.5">📹 视频预览</TabsTrigger>
-            <TabsTrigger value="voiceover" className="inline-flex items-center gap-1.5">🎙️ 配音管理</TabsTrigger>
-            <TabsTrigger value="compose" className="inline-flex items-center gap-1.5">🎬 合成视频</TabsTrigger>
+        {/* Action progress indicator */}
+        {loadingAction && (
+          <div className="mb-6 p-3 sm:p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-lg">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="relative shrink-0">
+                <div className="w-10 h-10 rounded-full border-2 border-emerald-500/30 border-t-emerald-500 animate-spin" />
+                <Film className="h-4 w-4 text-emerald-400 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-emerald-400">
+                  {getActionLabel()}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  请耐心等待，不要离开此页面
+                </p>
+              </div>
+            </div>
+            {actionProgress.total > 0 && (
+              <div className="w-full bg-emerald-500/20 rounded-full h-1.5 overflow-hidden">
+                <div
+                  className="h-full bg-emerald-500 rounded-full transition-all duration-700 ease-out"
+                  style={{
+                    width: `${(actionProgress.current / actionProgress.total) * 100}%`,
+                  }}
+                />
+              </div>
+            )}
+          </div>
+        )}
+
+        <Tabs defaultValue="preview" className="space-y-4 sm:space-y-6">
+          {/* Tabs — horizontally scrollable on mobile */}
+          <TabsList className="bg-muted/30 w-full overflow-x-auto flex h-auto p-1 gap-1">
+            <TabsTrigger value="preview" className="inline-flex items-center gap-1.5 shrink-0 min-h-[40px] text-xs sm:text-sm px-3 sm:px-4">📹 视频预览</TabsTrigger>
+            <TabsTrigger value="voiceover" className="inline-flex items-center gap-1.5 shrink-0 min-h-[40px] text-xs sm:text-sm px-3 sm:px-4">🎙️ 配音管理</TabsTrigger>
+            <TabsTrigger value="compose" className="inline-flex items-center gap-1.5 shrink-0 min-h-[40px] text-xs sm:text-sm px-3 sm:px-4">🎬 合成视频</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="preview">
+          <TabsContent value="preview" className="w-full">
             <VideoPreview
               videoUrl={mergedVideoUrl}
               episodes={episodes.map((ep) => ({
@@ -313,31 +409,31 @@ export default function PreviewPageContent() {
           <TabsContent value="compose">
             <div className="space-y-4">
               {/* AI 视频生成 */}
-              <div className="border border-border/50 rounded-lg p-6 bg-card/50">
+              <div className="border border-border/50 rounded-lg p-4 sm:p-6 bg-card/50">
                 <div className="flex items-center gap-2 mb-2">
                   <Film className="h-5 w-5 text-emerald-400" />
-                  <h3 className="font-semibold">AI 视频生成</h3>
-                  <span className="text-xs bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded">CogVideoX Flash</span>
+                  <h3 className="font-semibold text-sm sm:text-base">AI 视频生成</h3>
+                  <span className="text-xs bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded hidden sm:inline">CogVideoX Flash</span>
                 </div>
-                <p className="text-sm text-muted-foreground mb-4">
-                  使用智谱 AI 将每集分镜图片生成动态短视频，画面会动起来。每集约需 1-3 分钟。
+                <p className="text-xs sm:text-sm text-muted-foreground mb-4">
+                  使用智谱 AI 将每集分镜图片生成动态短视频。每集约需 1-3 分钟。
                 </p>
-                <div className="space-y-2 mb-6">
+                <div className="space-y-2 mb-4 sm:mb-6">
                   {episodes.map((ep) => (
-                    <div key={ep.id} className="flex items-center gap-3 text-sm">
-                      <span className="w-16 shrink-0">EP{ep.episodeNumber}</span>
-                      <span className={`w-3 h-3 rounded-full ${ep.imageUrl ? "bg-emerald-500" : "bg-red-500"}`} />
-                      <span className="text-xs text-muted-foreground">分镜</span>
-                      <span className={`w-3 h-3 rounded-full ${ep.videoUrl ? "bg-emerald-500" : "bg-zinc-600"}`} />
-                      <span className="text-xs text-muted-foreground">AI视频</span>
-                      {ep.videoUrl && <span className="text-xs text-emerald-400 inline-flex items-center gap-0.5"><Check className="h-3 w-3 text-emerald-400" /> 已生成</span>}
+                    <div key={ep.id} className="flex items-center gap-2 sm:gap-3 text-xs sm:text-sm">
+                      <span className="w-12 sm:w-16 shrink-0">EP{ep.episodeNumber}</span>
+                      <span className={`w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full shrink-0 ${ep.imageUrl ? "bg-emerald-500" : "bg-red-500"}`} />
+                      <span className="text-xs text-muted-foreground hidden sm:inline">分镜</span>
+                      <span className={`w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full shrink-0 ${ep.videoUrl ? "bg-emerald-500" : "bg-zinc-600"}`} />
+                      <span className="text-xs text-muted-foreground hidden sm:inline">AI视频</span>
+                      {ep.videoUrl && <span className="text-xs text-emerald-400 inline-flex items-center gap-0.5"><Check className="h-3 w-3" /> 已生成</span>}
                     </div>
                   ))}
                 </div>
                 <Button
                   onClick={handleGenerateVideos}
                   disabled={loadingAction === "video-gen"}
-                  className="bg-emerald-600 hover:bg-emerald-500"
+                  className="bg-emerald-600 hover:bg-emerald-500 min-h-[44px] w-full sm:w-auto"
                 >
                   {loadingAction === "video-gen" ? (
                     <>
@@ -354,28 +450,28 @@ export default function PreviewPageContent() {
               </div>
 
               {/* FFmpeg 幻灯片合成 */}
-              <div className="border border-border/50 rounded-lg p-6 bg-card/50">
-                <h3 className="font-semibold mb-2">幻灯片合成（备选）</h3>
-                <p className="text-sm text-muted-foreground mb-4">
-                  将分镜图片和配音合成为幻灯片视频（图片不动）。如果 AI 视频生成失败或没有分镜图，可以用这个。
+              <div className="border border-border/50 rounded-lg p-4 sm:p-6 bg-card/50">
+                <h3 className="font-semibold text-sm sm:text-base mb-2">幻灯片合成（备选）</h3>
+                <p className="text-xs sm:text-sm text-muted-foreground mb-4">
+                  将分镜图片和配音合成为幻灯片视频。如果 AI 视频生成失败，可以用这个。
                 </p>
-                <div className="space-y-2 mb-6">
+                <div className="space-y-2 mb-4 sm:mb-6">
                   {episodes.map((ep) => (
-                    <div key={ep.id} className="flex items-center gap-3 text-sm">
-                      <span className="w-16 shrink-0">EP{ep.episodeNumber}</span>
-                      <span className={`w-3 h-3 rounded-full ${ep.imageUrl ? "bg-emerald-500" : "bg-red-500"}`} />
-                      <span className="text-xs text-muted-foreground">分镜</span>
-                      <span className={`w-3 h-3 rounded-full ${ep.voiceoverUrl ? "bg-emerald-500" : "bg-red-500"}`} />
-                      <span className="text-xs text-muted-foreground">配音</span>
-                      <span className={`w-3 h-3 rounded-full ${ep.videoUrl ? "bg-emerald-500" : "bg-zinc-600"}`} />
-                      <span className="text-xs text-muted-foreground">视频</span>
+                    <div key={ep.id} className="flex items-center gap-2 sm:gap-3 text-xs sm:text-sm">
+                      <span className="w-12 sm:w-16 shrink-0">EP{ep.episodeNumber}</span>
+                      <span className={`w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full shrink-0 ${ep.imageUrl ? "bg-emerald-500" : "bg-red-500"}`} />
+                      <span className="text-xs text-muted-foreground hidden sm:inline">分镜</span>
+                      <span className={`w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full shrink-0 ${ep.voiceoverUrl ? "bg-emerald-500" : "bg-red-500"}`} />
+                      <span className="text-xs text-muted-foreground hidden sm:inline">配音</span>
+                      <span className={`w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full shrink-0 ${ep.videoUrl ? "bg-emerald-500" : "bg-zinc-600"}`} />
+                      <span className="text-xs text-muted-foreground hidden sm:inline">视频</span>
                     </div>
                   ))}
                 </div>
                 <Button
                   onClick={handleComposeAll}
                   disabled={loadingAction === "compose"}
-                  className="bg-emerald-600 hover:bg-emerald-500"
+                  className="bg-emerald-600 hover:bg-emerald-500 min-h-[44px] w-full sm:w-auto"
                 >
                   {loadingAction === "compose" ? (
                     <>
@@ -394,15 +490,15 @@ export default function PreviewPageContent() {
           </TabsContent>
         </Tabs>
 
-        <div className="flex justify-between mt-8">
+        <div className="flex flex-col sm:flex-row justify-between gap-3 mt-8">
           <Link href={`/create/storyboard?dramaId=${dramaId}`}>
-            <Button variant="outline">
+            <Button variant="outline" className="w-full sm:w-auto min-h-[44px]">
               <ArrowLeft className="h-4 w-4 mr-2" />
               上一步
             </Button>
           </Link>
           <Link href="/dashboard">
-            <Button variant="outline">
+            <Button variant="outline" className="w-full sm:w-auto min-h-[44px]">
               返回我的短剧
             </Button>
           </Link>

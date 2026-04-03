@@ -92,7 +92,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             id: user.id,
             email: user.email,
             name: user.name,
-            credits: 10,
+            credits: 200,
           });
         }
       } catch (error) {

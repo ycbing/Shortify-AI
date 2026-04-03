@@ -17,6 +17,17 @@ const steps = [
   { number: 4, title: "预览" },
 ];
 
+// Animated typing dots component
+function TypingDots() {
+  return (
+    <span className="inline-flex items-center gap-1 ml-1">
+      <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+      <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+      <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+    </span>
+  );
+}
+
 export default function ScriptPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -28,6 +39,7 @@ export default function ScriptPageContent() {
   const [title, setTitle] = useState("");
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
+  const [generateStartTime, setGenerateStartTime] = useState<number>(0);
   const [error, setError] = useState("");
 
   const fetchScript = useCallback(async () => {
@@ -132,6 +144,7 @@ export default function ScriptPageContent() {
   const handleGenerate = async () => {
     if (!dramaId) return;
     setGenerating(true);
+    setGenerateStartTime(Date.now());
     setError("");
 
     try {
@@ -186,16 +199,23 @@ export default function ScriptPageContent() {
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b border-border/50 bg-background/80 backdrop-blur-xl sticky top-0 z-40">
-        <div className="mx-auto max-w-3xl flex items-center justify-between px-4 h-16">
+        <div className="mx-auto max-w-3xl flex items-center justify-between px-4 h-14 sm:h-16">
           <StepIndicator currentStep={2} steps={steps} />
         </div>
       </header>
 
-      <main className="mx-auto max-w-3xl px-4 py-10">
-        <div className="mb-8">
-          <h1 className="text-2xl font-bold mb-2">AI 剧本 ✍️</h1>
+      <main className="mx-auto max-w-3xl px-4 py-8 sm:py-10">
+        {/* Step hint */}
+        <div className="mb-6 sm:mb-8 p-3 sm:p-4 rounded-lg bg-emerald-500/5 border border-emerald-500/20">
+          <p className="text-xs sm:text-sm text-emerald-400">
+            ✍️ AI 正在为你创作剧本，你可以编辑调整每一集的内容
+          </p>
+        </div>
+
+        <div className="mb-6 sm:mb-8">
+          <h1 className="text-xl sm:text-2xl font-bold mb-2">AI 剧本 ✍️</h1>
           {title && (
-            <p className="text-muted-foreground">《{title}》- 共 {scriptV2 ? scriptV2.episodes.length : episodes.length} 集</p>
+            <p className="text-sm sm:text-base text-muted-foreground">《{title}》- 共 {scriptV2 ? scriptV2.episodes.length : episodes.length} 集</p>
           )}
         </div>
 
@@ -204,34 +224,57 @@ export default function ScriptPageContent() {
         )}
 
         {generating ? (
-          <div className="flex flex-col items-center justify-center py-20">
-            <Loader2 className="h-8 w-8 animate-spin text-emerald-400 mb-4" />
-            <p className="text-muted-foreground">AI 正在创作剧本...</p>
-            <p className="text-xs text-muted-foreground mt-2">通常需要 10-30 秒</p>
+          <div className="flex flex-col items-center justify-center py-16 sm:py-20">
+            {/* Animated progress indicator */}
+            <div className="relative mb-6">
+              <div className="w-16 h-16 rounded-full border-2 border-emerald-500/20 border-t-emerald-500 animate-spin" />
+              <Sparkles className="h-6 w-6 text-emerald-400 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
+            </div>
+            <p className="text-base sm:text-lg font-medium text-foreground mb-2">
+              AI 正在创作中
+              <TypingDots />
+            </p>
+            <p className="text-sm text-muted-foreground mb-4">
+              通常需要 10-30 秒，请耐心等待
+            </p>
+            <div className="flex items-center gap-4 text-xs text-muted-foreground">
+              <div className="flex items-center gap-1.5">
+                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span>构思剧情</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-2 h-2 rounded-full bg-emerald-500/50 animate-pulse" style={{ animationDelay: "500ms" }} />
+                <span>编写台词</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-2 h-2 rounded-full bg-emerald-500/30 animate-pulse" style={{ animationDelay: "1000ms" }} />
+                <span>打磨细节</span>
+              </div>
+            </div>
           </div>
         ) : scriptV2 ? (
           <>
             {/* V2 Format: Characters + Shots Timeline */}
-            <div className="space-y-8">
+            <div className="space-y-6 sm:space-y-8">
               {/* Character Cards */}
               <section>
-                <div className="flex items-center gap-2 mb-4">
+                <div className="flex items-center gap-2 mb-3 sm:mb-4">
                   <Users className="h-5 w-5 text-emerald-400" />
-                  <h2 className="text-lg font-semibold">角色列表</h2>
+                  <h2 className="text-base sm:text-lg font-semibold">角色列表</h2>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {scriptV2.characters.map((char, idx) => (
                     <div
                       key={idx}
-                      className="border border-border/50 rounded-lg p-4 bg-card/50"
+                      className="border border-border/50 rounded-lg p-3 sm:p-4 bg-card/50"
                     >
                       <div className="flex items-center justify-between mb-2">
-                        <h3 className="font-medium text-base">{char.name}</h3>
+                        <h3 className="font-medium text-sm sm:text-base">{char.name}</h3>
                         <span className="text-xs bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded">
                           {getVoiceLabel(char.voiceId)}
                         </span>
                       </div>
-                      <p className="text-sm text-muted-foreground leading-relaxed">
+                      <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed">
                         {char.description}
                       </p>
                     </div>
@@ -242,9 +285,9 @@ export default function ScriptPageContent() {
               {/* Episode Shots Timeline */}
               {scriptV2.episodes.map((episode) => (
                 <section key={episode.episodeNumber}>
-                  <div className="flex items-center gap-2 mb-4">
+                  <div className="flex items-center gap-2 mb-3 sm:mb-4">
                     <Film className="h-5 w-5 text-emerald-400" />
-                    <h2 className="text-lg font-semibold">
+                    <h2 className="text-base sm:text-lg font-semibold">
                       第{episode.episodeNumber}集: {episode.title}
                     </h2>
                     <span className="text-xs text-muted-foreground">
@@ -255,7 +298,7 @@ export default function ScriptPageContent() {
                   {episode.sceneDescription && (
                     <div className="mb-3 p-3 rounded-lg bg-muted/30 border border-border/30">
                       <p className="text-xs text-muted-foreground mb-1">场景描述</p>
-                      <p className="text-sm leading-relaxed">{episode.sceneDescription}</p>
+                      <p className="text-xs sm:text-sm leading-relaxed">{episode.sceneDescription}</p>
                     </div>
                   )}
 
@@ -263,13 +306,13 @@ export default function ScriptPageContent() {
                     {episode.shots.map((shot) => (
                       <div
                         key={shot.shotNumber}
-                        className={`border rounded-lg p-3 ${
+                        className={`border rounded-lg p-2.5 sm:p-3 ${
                           shot.type === "dialogue"
                             ? "border-blue-500/30 bg-blue-500/5"
                             : "border-border/50 bg-card/50"
                         }`}
                       >
-                        <div className="flex items-center gap-2 mb-1.5">
+                        <div className="flex items-center gap-2 mb-1.5 flex-wrap">
                           <span className="text-xs font-mono bg-muted px-1.5 py-0.5 rounded">
                             #{shot.shotNumber}
                           </span>
@@ -286,19 +329,19 @@ export default function ScriptPageContent() {
                             {shot.duration}s
                           </span>
                         </div>
-                        <p className="text-sm text-muted-foreground leading-relaxed mb-1">
+                        <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed mb-1">
                           {shot.visual}
                         </p>
                         {shot.type === "dialogue" && shot.character && (
                           <div className="mt-2 pl-3 border-l-2 border-blue-500/50">
-                            <span className="text-sm font-medium text-blue-400">
+                            <span className="text-xs sm:text-sm font-medium text-blue-400">
                               {shot.character}:
                             </span>
-                            <span className="text-sm ml-1">"{shot.line}"</span>
+                            <span className="text-xs sm:text-sm ml-1">"{shot.line}"</span>
                           </div>
                         )}
                         {shot.type === "narration" && shot.subtitle && (
-                          <p className="mt-1 text-sm italic text-amber-300/80">
+                          <p className="mt-1 text-xs sm:text-sm italic text-amber-300/80">
                             {shot.subtitle}
                           </p>
                         )}
@@ -309,15 +352,15 @@ export default function ScriptPageContent() {
               ))}
             </div>
 
-            <div className="flex justify-between mt-8">
+            <div className="flex flex-col sm:flex-row justify-between gap-3 mt-8">
               <Link href="/create">
-                <Button variant="outline">
+                <Button variant="outline" className="w-full sm:w-auto min-h-[44px]">
                   <ArrowLeft className="h-4 w-4 mr-2" />
                   上一步
                 </Button>
               </Link>
               <Link href={`/create/storyboard?dramaId=${dramaId}`}>
-                <Button className="bg-emerald-600 hover:bg-emerald-500">
+                <Button className="bg-emerald-600 hover:bg-emerald-500 w-full sm:w-auto min-h-[44px]">
                   下一步：生成分镜
                   <ArrowRight className="h-4 w-4 ml-2" />
                 </Button>
@@ -333,15 +376,15 @@ export default function ScriptPageContent() {
               editable
             />
 
-            <div className="flex justify-between mt-8">
+            <div className="flex flex-col sm:flex-row justify-between gap-3 mt-8">
               <Link href="/create">
-                <Button variant="outline">
+                <Button variant="outline" className="w-full sm:w-auto min-h-[44px]">
                   <ArrowLeft className="h-4 w-4 mr-2" />
                   上一步
                 </Button>
               </Link>
               <Link href={`/create/storyboard?dramaId=${dramaId}`}>
-                <Button className="bg-emerald-600 hover:bg-emerald-500">
+                <Button className="bg-emerald-600 hover:bg-emerald-500 w-full sm:w-auto min-h-[44px]">
                   下一步：生成分镜
                   <ArrowRight className="h-4 w-4 ml-2" />
                 </Button>
@@ -349,13 +392,13 @@ export default function ScriptPageContent() {
             </div>
           </>
         ) : (
-          <div className="flex flex-col items-center justify-center py-20">
+          <div className="flex flex-col items-center justify-center py-16 sm:py-20">
             <Sparkles className="h-8 w-8 text-emerald-400 mb-4" />
             <p className="mb-4">点击按钮让 AI 为你创作剧本</p>
             <Button
               onClick={handleGenerate}
               disabled={generating}
-              className="bg-emerald-600 hover:bg-emerald-500"
+              className="bg-emerald-600 hover:bg-emerald-500 min-h-[44px]"
             >
               {generating ? "生成中..." : "生成剧本"}
             </Button>

@@ -9,21 +9,37 @@ export async function GET(
   { params }: { params: Promise<{ dramaId: string }> }
 ) {
   try {
+    const { dramaId } = await params;
     const session = await auth();
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "未登录" }, { status: 401 });
+
+    // Allow public access for completed dramas (no auth required)
+    // For non-completed dramas, require auth and ownership
+    let drama;
+    if (session?.user?.id) {
+      [drama] = await db
+        .select()
+        .from(dramas)
+        .where(and(eq(dramas.id, dramaId), eq(dramas.userId, session.user.id)))
+        .limit(1);
     }
 
-    const { dramaId } = await params;
-
-    const [drama] = await db
-      .select()
-      .from(dramas)
-      .where(and(eq(dramas.id, dramaId), eq(dramas.userId, session.user.id)))
-      .limit(1);
-
     if (!drama) {
-      return NextResponse.json({ error: "短剧不存在" }, { status: 404 });
+      // Try public access (completed dramas only)
+      [drama] = await db
+        .select()
+        .from(dramas)
+        .where(eq(dramas.id, dramaId))
+        .limit(1);
+
+      if (!drama) {
+        return NextResponse.json({ error: "短剧不存在" }, { status: 404 });
+      }
+
+      // Only allow public access to completed or storyboard_ready+ dramas
+      const publicStatuses = ["completed", "storyboard_ready", "voiceover_ready"];
+      if (!publicStatuses.includes(drama.status || "")) {
+        return NextResponse.json({ error: "短剧不存在" }, { status: 404 });
+      }
     }
 
     const dramaEpisodes = await db

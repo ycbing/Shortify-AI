@@ -6,7 +6,25 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { VideoPreview } from "@/components/drama/video-preview";
 import { ExportDialog } from "@/components/drama/export-dialog";
-import { Loader2, ArrowLeft, Edit3, Check } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import {
+  Loader2,
+  ArrowLeft,
+  Edit3,
+  Check,
+  Share2,
+  Copy,
+  CheckCircle2,
+  MessageCircle,
+  ExternalLink,
+  QrCode,
+} from "lucide-react";
 import Link from "next/link";
 
 interface DramaData {
@@ -17,6 +35,9 @@ interface DramaData {
   style: string | null;
   status: string;
   totalDuration: number | null;
+  coverUrl: string | null;
+  bgmUrl: string | null;
+  shareCount: number | null;
   createdAt: string;
 }
 
@@ -32,15 +53,13 @@ interface EpisodeData {
   duration: number | null;
 }
 
-/** Convert a local upload path to a public /api/uploads/ URL */
 /** Convert a local upload path or COS URL to an accessible URL */
 function toPublicUrl(localPath: string | null): string | null {
   if (!localPath) return null;
-  // COS URL -> proxy through /api/uploads/cos/ for signed access
   if (localPath.includes(".cos.") && localPath.startsWith("http")) {
     try {
       const url = new URL(localPath);
-      const cosKey = url.pathname.slice(1); // remove leading /
+      const cosKey = url.pathname.slice(1);
       return `/api/uploads/cos/${encodeURIComponent(cosKey)}`;
     } catch {
       return localPath;
@@ -60,6 +79,16 @@ export default function ViewDramaPage() {
   const [loading, setLoading] = useState(true);
   const [selectedEpisode, setSelectedEpisode] = useState(0);
 
+  // Share state
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareInfo, setShareInfo] = useState<{
+    shareUrl: string;
+    title: string;
+    coverUrl: string | null;
+  } | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
+  const [showWechatTip, setShowWechatTip] = useState(false);
+
   const fetchDrama = useCallback(async () => {
     if (!dramaId) return;
     setLoading(true);
@@ -69,7 +98,6 @@ export default function ViewDramaPage() {
       if (res.ok) {
         const data = await res.json();
         setDrama(data.drama);
-        // 将本地路径转为可访问的 URL
         const processedEpisodes = (data.episodes || []).map((ep: EpisodeData) => ({
           ...ep,
           voiceoverUrl: toPublicUrl(ep.voiceoverUrl),
@@ -94,17 +122,55 @@ export default function ViewDramaPage() {
     fetchDrama();
   }, [dramaId]);
 
-  const handleExport = async (format: string, _resolution: string) => {
+  const handleShare = async () => {
+    if (!dramaId) return;
     try {
-      const res = await fetch(`/api/dramas/${dramaId}/export`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ format }),
-      });
-      if (res.ok) alert("导出成功！");
+      const res = await fetch(`/api/dramas/${dramaId}/share`);
+      if (res.ok) {
+        const data = await res.json();
+        setShareInfo({
+          shareUrl: data.shareUrl,
+          title: data.title,
+          coverUrl: toPublicUrl(data.coverUrl),
+        });
+        setShareOpen(true);
+        setLinkCopied(false);
+        setShowWechatTip(false);
+      }
     } catch {
       // ignore
     }
+  };
+
+  const copyLink = async () => {
+    if (!shareInfo) return;
+    try {
+      await navigator.clipboard.writeText(shareInfo.shareUrl);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    } catch {
+      // Fallback
+      const textarea = document.createElement("textarea");
+      textarea.value = shareInfo.shareUrl;
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    }
+  };
+
+  const getWeiboShareUrl = () => {
+    if (!shareInfo) return "#";
+    const text = `来看看我创作的AI短剧《${shareInfo.title}》`;
+    return `https://service.weibo.com/share/share.php?title=${encodeURIComponent(text)}&url=${encodeURIComponent(shareInfo.shareUrl)}`;
+  };
+
+  const getQQShareUrl = () => {
+    if (!shareInfo) return "#";
+    const title = `AI短剧 - ${shareInfo.title}`;
+    return `https://connect.qq.com/widget/shareqq/index.html?title=${encodeURIComponent(title)}&url=${encodeURIComponent(shareInfo.shareUrl)}`;
   };
 
   if (loading) {
@@ -145,6 +211,14 @@ export default function ViewDramaPage() {
             </Button>
           </Link>
           <div className="flex items-center gap-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleShare}
+            >
+              <Share2 className="h-3.5 w-3.5 mr-1.5" />
+              分享
+            </Button>
             <Link href={`/create/editor/${dramaId}`}>
               <Button variant="outline" size="sm">
                 <Edit3 className="h-3.5 w-3.5 mr-1.5" />
@@ -154,7 +228,6 @@ export default function ViewDramaPage() {
             <ExportDialog
               dramaId={dramaId}
               episodeCount={episodes.length}
-              onExport={handleExport}
             />
           </div>
         </div>
@@ -166,6 +239,11 @@ export default function ViewDramaPage() {
           <div className="flex items-center gap-3 mb-2">
             <h1 className="text-2xl font-bold">{drama.title}</h1>
             <Badge variant="outline">{statusLabels[drama.status] || drama.status}</Badge>
+            {drama.shareCount != null && drama.shareCount > 0 && (
+              <span className="text-xs text-muted-foreground">
+                {drama.shareCount} 次分享
+              </span>
+            )}
           </div>
           {drama.description && (
             <p className="text-muted-foreground">{drama.description}</p>
@@ -233,6 +311,114 @@ export default function ViewDramaPage() {
           </div>
         )}
       </main>
+
+      {/* Share Dialog */}
+      <Dialog open={shareOpen} onOpenChange={setShareOpen}>
+        <DialogContent className="bg-card border-border/50 sm:max-w-md mx-4">
+          <DialogHeader>
+            <DialogTitle>分享短剧</DialogTitle>
+            <DialogDescription>
+              复制链接或分享到社交媒体，让更多人看到你的作品
+            </DialogDescription>
+          </DialogHeader>
+
+          {shareInfo && (
+            <div className="space-y-4 py-2">
+              {/* Cover preview */}
+              {shareInfo.coverUrl && (
+                <div className="aspect-video rounded-lg overflow-hidden bg-muted">
+                  <img
+                    src={shareInfo.coverUrl}
+                    alt={shareInfo.title}
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+              )}
+
+              {/* Title */}
+              <div className="text-center">
+                <h3 className="font-semibold">{shareInfo.title}</h3>
+                <p className="text-sm text-muted-foreground mt-1">
+                  由 AI 创作
+                </p>
+              </div>
+
+              {/* Copy link */}
+              <div className="flex items-center gap-2">
+                <div className="flex-1 bg-muted rounded-lg px-3 py-2 text-sm text-muted-foreground truncate">
+                  {shareInfo.shareUrl}
+                </div>
+                <Button
+                  onClick={copyLink}
+                  variant={linkCopied ? "default" : "outline"}
+                  size="sm"
+                  className={linkCopied ? "bg-emerald-600 hover:bg-emerald-500 min-h-[40px]" : "min-h-[40px]"}
+                >
+                  {linkCopied ? (
+                    <>
+                      <CheckCircle2 className="h-4 w-4 mr-1" />
+                      已复制
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-4 w-4 mr-1" />
+                      复制
+                    </>
+                  )}
+                </Button>
+              </div>
+
+              {/* Social share buttons */}
+              <div className="grid grid-cols-3 gap-2">
+                {/* WeChat — show tip to copy link */}
+                <button
+                  onClick={() => setShowWechatTip(true)}
+                  className="flex flex-col items-center gap-1.5 p-3 rounded-lg border border-border/50 hover:bg-green-500/10 hover:border-green-500/50 transition-all"
+                >
+                  <MessageCircle className="h-5 w-5 text-green-500" />
+                  <span className="text-xs text-muted-foreground">微信</span>
+                </button>
+
+                {/* Weibo */}
+                <a
+                  href={getWeiboShareUrl()}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex flex-col items-center gap-1.5 p-3 rounded-lg border border-border/50 hover:bg-red-500/10 hover:border-red-500/50 transition-all"
+                >
+                  <ExternalLink className="h-5 w-5 text-red-500" />
+                  <span className="text-xs text-muted-foreground">微博</span>
+                </a>
+
+                {/* QQ */}
+                <a
+                  href={getQQShareUrl()}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex flex-col items-center gap-1.5 p-3 rounded-lg border border-border/50 hover:bg-blue-500/10 hover:border-blue-500/50 transition-all"
+                >
+                  <QrCode className="h-5 w-5 text-blue-500" />
+                  <span className="text-xs text-muted-foreground">QQ</span>
+                </a>
+              </div>
+
+              {/* WeChat tip */}
+              {showWechatTip && (
+                <div className="p-3 rounded-lg bg-green-500/5 border border-green-500/20">
+                  <p className="text-sm text-green-400">
+                    💡 请点击上方「复制」按钮，然后在微信中粘贴链接发送给朋友
+                  </p>
+                </div>
+              )}
+
+              {/* Short video platform tip */}
+              <p className="text-xs text-muted-foreground text-center">
+                💡 复制链接发送给朋友，即可分享你的 AI 短剧作品
+              </p>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -46,19 +46,16 @@ export function getSignedCosUrl(cosKey: string, expires: number = 7200): string 
   const client = getCosClient();
   if (!client) return getCosUrl(cosKey);
 
-  return client.getObjectUrl(
-    {
-      Bucket: BUCKET(),
-      Region: REGION(),
-      Key: cosKey,
-      Sign: true,
-      Expires: expires,
-    },
-    (err, data) => {
-      if (err) return getCosUrl(cosKey);
-      return data.Url;
-    }
-  ) as unknown as string;
+  // getObjectUrl is synchronous when Sign=true (returns URL directly)
+  const url = client.getObjectUrl({
+    Bucket: BUCKET(),
+    Region: REGION(),
+    Key: cosKey,
+    Sign: true,
+    Expires: expires,
+  });
+
+  return url || getCosUrl(cosKey);
 }
 
 /**

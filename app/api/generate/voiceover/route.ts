@@ -7,6 +7,7 @@ import { v4 as uuidv4 } from "uuid";
 import { generateVoiceover, generateShotVoiceovers } from "@/lib/ai/voiceover-generator";
 import type { Shot } from "@/types/drama";
 import path from "path";
+import { checkCredits, deductCredits, CREDIT_COSTS } from "@/lib/credits";
 
 export async function POST(request: NextRequest) {
   try {
@@ -25,6 +26,15 @@ export async function POST(request: NextRequest) {
     const uploadDir = process.env.UPLOAD_DIR || "./uploads";
 
     if (episodeId) {
+      // Check credits for single episode
+      const creditCheck = await checkCredits(session.user.id, CREDIT_COSTS.voiceover);
+      if (!creditCheck.ok) {
+        return NextResponse.json(
+          { error: `积分不足，需要 ${CREDIT_COSTS.voiceover} 积分，当前余额 ${creditCheck.balance} 积分`, code: "INSUFFICIENT_CREDITS" },
+          { status: 402 }
+        );
+      }
+
       // Generate for single episode
       const [episode] = await db
         .select()
@@ -91,6 +101,9 @@ export async function POST(request: NextRequest) {
         })
         .where(eq(episodes.id, episodeId));
 
+      // Deduct credits
+      await deductCredits(session.user.id, "voiceover", undefined, dramaId, `生成配音 - 第${episode.episodeNumber}集`);
+
       return NextResponse.json({
         episodeId,
         voiceoverUrl: result.filePath,
@@ -104,6 +117,16 @@ export async function POST(request: NextRequest) {
       .from(episodes)
       .where(eq(episodes.dramaId, dramaId))
       .orderBy(episodes.episodeNumber);
+
+    // Check credits for all episodes
+    const totalVoiceoverCredits = allEpisodes.length * CREDIT_COSTS.voiceover;
+    const voiceCreditCheck = await checkCredits(session.user.id, totalVoiceoverCredits);
+    if (!voiceCreditCheck.ok) {
+      return NextResponse.json(
+        { error: `积分不足，生成 ${allEpisodes.length} 集配音需要 ${totalVoiceoverCredits} 积分，当前余额 ${voiceCreditCheck.balance} 积分`, code: "INSUFFICIENT_CREDITS" },
+        { status: 402 }
+      );
+    }
 
     const taskId = uuidv4();
     await db.insert(generationTasks).values({
@@ -189,6 +212,9 @@ export async function POST(request: NextRequest) {
       .update(generationTasks)
       .set({ status: "completed", outputData: { results }, completedAt: new Date() })
       .where(eq(generationTasks.id, taskId));
+
+    // Deduct credits
+    await deductCredits(session.user.id, "voiceover", totalVoiceoverCredits, dramaId, `生成配音 - 共${allEpisodes.length}集`);
 
     return NextResponse.json({ taskId, results });
   } catch (error) {

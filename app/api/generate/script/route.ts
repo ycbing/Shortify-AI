@@ -7,12 +7,22 @@ import { v4 as uuidv4 } from "uuid";
 import { generateScript, extractNarrationFromShots } from "@/lib/ai/script-generator";
 import { isScriptV2 } from "@/types/drama";
 import type { DramaGenreType, DramaStyleType, GeneratedScriptV2 } from "@/types/drama";
+import { checkCredits, deductCredits, CREDIT_COSTS } from "@/lib/credits";
 
 export async function POST(request: NextRequest) {
   try {
     const session = await auth();
     if (!session?.user?.id) {
       return NextResponse.json({ error: "未登录" }, { status: 401 });
+    }
+
+    // Check credits
+    const creditCheck = await checkCredits(session.user.id, CREDIT_COSTS.script);
+    if (!creditCheck.ok) {
+      return NextResponse.json(
+        { error: `积分不足，需要 ${CREDIT_COSTS.script} 积分，当前余额 ${creditCheck.balance} 积分`, code: "INSUFFICIENT_CREDITS" },
+        { status: 402 }
+      );
     }
 
     const body = await request.json();
@@ -56,6 +66,9 @@ export async function POST(request: NextRequest) {
       (drama.style as DramaStyleType) || "realistic",
       drama.episodeCount || 3
     );
+
+    // Deduct credits after successful generation
+    await deductCredits(session.user.id, "script", undefined, dramaId);
 
     // Update drama title and characters (V2)
     const updateData: Record<string, unknown> = {

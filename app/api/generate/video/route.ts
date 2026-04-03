@@ -14,6 +14,7 @@ import { uploadFileToCos, aiVideoCosKey } from "@/lib/ai/cos-storage";
 import type { Shot } from "@/types/drama";
 import path from "path";
 import fs from "fs/promises";
+import { checkCredits, deductCredits, CREDIT_COSTS } from "@/lib/credits";
 
 export async function POST(request: NextRequest) {
   try {
@@ -52,6 +53,23 @@ export async function POST(request: NextRequest) {
         .from(episodes)
         .where(eq(episodes.dramaId, dramaId))
         .orderBy(episodes.episodeNumber);
+    }
+
+    // Estimate total shots for credit check
+    const totalShots = targetEpisodes.reduce((sum, ep) => {
+      if (ep.shotData && Array.isArray(ep.shotData)) {
+        return sum + (ep.shotData as unknown as Shot[]).length;
+      }
+      return sum + 1; // V1 fallback: 1 shot per episode
+    }, 0);
+    const totalVideoCredits = totalShots * CREDIT_COSTS.video;
+
+    const videoCreditCheck = await checkCredits(session.user.id, totalVideoCredits);
+    if (!videoCreditCheck.ok) {
+      return NextResponse.json(
+        { error: `积分不足，AI 视频生成需要 ${totalVideoCredits} 积分（${totalShots} 个镜头 × ${CREDIT_COSTS.video} 积分），当前余额 ${videoCreditCheck.balance} 积分`, code: "INSUFFICIENT_CREDITS" },
+        { status: 402 }
+      );
     }
 
     // Update drama status

@@ -52,6 +52,8 @@ export const dramas = pgTable(
     status: text("status").default("draft"), // draft/generating/script_ready/storyboard_ready/voiceover_ready/completed/error
     totalDuration: integer("total_duration"),
     coverUrl: text("cover_url"),
+    bgmUrl: text("bgm_url"), // user-uploaded background music file
+    shareCount: integer("share_count").default(0), // share click counter
     characters: jsonb("characters"), // v2: character list with voiceId
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
@@ -85,6 +87,27 @@ export const episodes = pgTable(
   ]
 );
 
+// Usage logs (credits consumption tracking)
+export const usageLogs = pgTable(
+  "usage_logs",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    type: text("type").notNull(), // script/storyboard/voiceover/compose/video
+    creditsUsed: integer("credits_used").notNull(),
+    dramaId: text("drama_id")
+      .references(() => dramas.id, { onDelete: "set null" }),
+    description: text("description"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("usage_logs_user_id_idx").on(table.userId),
+    index("usage_logs_drama_id_idx").on(table.dramaId),
+  ]
+);
+
 // Generation tasks (async job tracking)
 export const generationTasks = pgTable(
   "generation_tasks",
@@ -112,5 +135,7 @@ export type Drama = typeof dramas.$inferSelect;
 export type NewDrama = typeof dramas.$inferInsert;
 export type Episode = typeof episodes.$inferSelect;
 export type NewEpisode = typeof episodes.$inferInsert;
+export type UsageLog = typeof usageLogs.$inferSelect;
+export type NewUsageLog = typeof usageLogs.$inferInsert;
 export type GenerationTask = typeof generationTasks.$inferSelect;
 export type NewGenerationTask = typeof generationTasks.$inferInsert;

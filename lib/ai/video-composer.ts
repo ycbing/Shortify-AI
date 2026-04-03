@@ -190,6 +190,8 @@ export async function composeEpisodeFromShots(
     subtitlePath?: string | null;
     shotImages?: Map<number, string>; // shotNumber -> image path
     shotVideos?: Map<number, string>; // shotNumber -> video path
+    bgmPath?: string | null; // BGM file path to mix into final video
+    bgmVolume?: number; // BGM volume (0-1), default 0.15
   }
 ): Promise<string> {
   const uploadDir = path.resolve(process.env.UPLOAD_DIR || "./uploads");
@@ -255,6 +257,7 @@ export async function composeEpisodeFromShots(
   }
 
   // Burn subtitles into the final video (after concat for accurate timing)
+  let finalOutputPath = outputPath;
   if (options?.subtitlePath) {
     const escapedSubPath = options.subtitlePath.replace(/'/g, "'\\''");
     const cmd = `ffmpeg -i "${rawOutputPath}" -vf "subtitles='${escapedSubPath}'" -c:v libx264 -c:a aac -movflags +faststart -y "${outputPath}"`;
@@ -263,6 +266,30 @@ export async function composeEpisodeFromShots(
     // Remove raw version if it's a separate file
     if (rawOutputPath !== outputPath) {
       await fs.unlink(rawOutputPath).catch(() => {});
+    }
+  }
+
+  // Mix BGM into the final video
+  if (options?.bgmPath) {
+    const bgmVol = options.bgmVolume ?? 0.15;
+    const bgmMixedPath = path.join(episodeDir, `episode-${episodeNumber}-bgm.mp4`);
+    const cmd = `ffmpeg -i "${finalOutputPath}" -i "${options.bgmPath}" -filter_complex "[1:a]volume=${bgmVol},afade=t=in:st=0:d=1,afade=t=out:st=60:d=2[bgm];[0:a][bgm]amix=inputs=2:duration=first:dropout_transition=2[aout]" -map 0:v -map "[aout]" -c:v copy -c:a aac -movflags +faststart -y "${bgmMixedPath}"`;
+    await execAsync(cmd, { timeout: 300000 }).catch(async (err) => {
+      console.warn("BGM mixing failed, using video without BGM:", err);
+      return;
+    });
+    // Replace with BGM-mixed version
+    try {
+      await fs.access(bgmMixedPath);
+      if (bgmMixedPath !== outputPath && bgmMixedPath !== finalOutputPath) {
+        if (finalOutputPath !== outputPath) {
+          await fs.unlink(finalOutputPath).catch(() => {});
+        }
+        await fs.rename(bgmMixedPath, outputPath);
+      }
+      finalOutputPath = outputPath;
+    } catch {
+      // BGM mixing failed, keep original
     }
   }
 

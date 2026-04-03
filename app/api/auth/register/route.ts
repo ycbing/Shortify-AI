@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
       id: userId,
       email,
       name: name || email.split("@")[0],
-      credits: 10,
+      credits: 200,
     });
 
     await db.insert(userPasswords).values({

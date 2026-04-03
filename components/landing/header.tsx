@@ -52,10 +52,11 @@ export function Header() {
           )}
         </nav>
 
-        {/* Mobile menu button */}
+        {/* Mobile menu button — 44px touch target */}
         <button
-          className="md:hidden text-muted-foreground"
+          className="md:hidden text-muted-foreground flex items-center justify-center min-h-[44px] min-w-[44px]"
           onClick={() => setMobileOpen(!mobileOpen)}
+          aria-label="菜单"
         >
           {mobileOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
         </button>

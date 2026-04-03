@@ -9,6 +9,7 @@ import { uploadFileToCos, imageCosKey } from "@/lib/ai/cos-storage";
 import path from "path";
 import fs from "fs/promises";
 import type { Shot } from "@/types/drama";
+import { checkCredits, deductCredits, CREDIT_COSTS } from "@/lib/credits";
 
 export async function POST(request: NextRequest) {
   try {
@@ -27,6 +28,15 @@ export async function POST(request: NextRequest) {
     const uploadDir = process.env.UPLOAD_DIR || "./uploads";
 
     if (episodeId) {
+      // Check credits for single episode
+      const creditCheck = await checkCredits(session.user.id, CREDIT_COSTS.storyboard);
+      if (!creditCheck.ok) {
+        return NextResponse.json(
+          { error: `积分不足，需要 ${CREDIT_COSTS.storyboard} 积分，当前余额 ${creditCheck.balance} 积分`, code: "INSUFFICIENT_CREDITS" },
+          { status: 402 }
+        );
+      }
+
       // Generate for a single episode
       const [episode] = await db
         .select()
@@ -63,15 +73,27 @@ export async function POST(request: NextRequest) {
         .set({ imageUrl })
         .where(eq(episodes.id, episodeId));
 
+      // Deduct credits
+      await deductCredits(session.user.id, "storyboard", undefined, dramaId, `生成分镜 - 第${episode.episodeNumber}集`);
+
       return NextResponse.json({ episodeId, imageUrl });
     }
 
-    // Generate for all episodes
+    // Check credits for all episodes
     const allEpisodes = await db
       .select()
       .from(episodes)
       .where(eq(episodes.dramaId, dramaId))
       .orderBy(episodes.episodeNumber);
+
+    const totalCredits = allEpisodes.length * CREDIT_COSTS.storyboard;
+    const bulkCreditCheck = await checkCredits(session.user.id, totalCredits);
+    if (!bulkCreditCheck.ok) {
+      return NextResponse.json(
+        { error: `积分不足，生成 ${allEpisodes.length} 集分镜需要 ${totalCredits} 积分，当前余额 ${bulkCreditCheck.balance} 积分`, code: "INSUFFICIENT_CREDITS" },
+        { status: 402 }
+      );
+    }
 
     const drama = await db.select().from(dramas).where(eq(dramas.id, dramaId)).limit(1);
     if (!drama.length) {
@@ -121,6 +143,18 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Set cover_url to the first episode's image if not already set
+    const firstResult = results.find((r) => r.imageUrl);
+    if (firstResult?.imageUrl) {
+      const currentDrama = await db.select({ coverUrl: dramas.coverUrl }).from(dramas).where(eq(dramas.id, dramaId)).limit(1);
+      if (!currentDrama[0]?.coverUrl) {
+        await db
+          .update(dramas)
+          .set({ coverUrl: firstResult.imageUrl })
+          .where(eq(dramas.id, dramaId));
+      }
+    }
+
     await db
       .update(dramas)
       .set({ status: "storyboard_ready", updatedAt: new Date() })
@@ -130,6 +164,9 @@ export async function POST(request: NextRequest) {
       .update(generationTasks)
       .set({ status: "completed", outputData: { results }, completedAt: new Date() })
       .where(eq(generationTasks.id, taskId));
+
+    // Deduct credits
+    await deductCredits(session.user.id, "storyboard", totalCredits, dramaId, `生成分镜图片 - 共${allEpisodes.length}集`);
 
     return NextResponse.json({ taskId, results });
   } catch (error) {
