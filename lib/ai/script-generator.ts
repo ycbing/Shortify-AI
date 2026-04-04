@@ -70,7 +70,7 @@ suspense(悬疑), romantic(浪漫), tense(紧张), calm(平静), dramatic(戏剧
 {
   "title": "短剧标题",
   "characters": [
-    { "name": "角色名", "description": "详细外貌描述，包含年龄、发型、穿着、体型等", "voiceId": "zh-CN-YunxiNeural" }
+    { "name": "角色名", "description": "角色简介", "voiceId": "zh-CN-YunxiNeural", "appearance": "详细固定外貌描述（性别+年龄+发型+五官+体型+服装+配饰）" }
   ],
   "episodes": [
     {
@@ -111,12 +111,21 @@ suspense(悬疑), romantic(浪漫), tense(紧张), calm(平静), dramatic(戏剧
 
 ## 重要规则
 - characters 数组中的角色描述必须包含详细外貌（年龄、发型、五官、穿着、体型）
-- 每个 shot 的 visual 必须包含角色外貌描述，以保证图片生成的一致性
+- **角色外貌一致性规则（极其重要）**：
+  1. 每个 character 必须包含 "appearance" 字段，格式为一段固定外貌描述
+  2. appearance 包括：性别、年龄、发型（颜色+长度+样式）、脸型特征、体型、服装（颜色+款式）、标志性配饰
+  3. 不同角色必须有至少 3 个明显不同特征（如不同发色、不同服装颜色、不同配饰）
+  4. 服装颜色示例：角色A 白色T恤+蓝色牛仔裤，角色B 红色连衣裙+白色运动鞋，角色C 黑色西装+银色手表
+  5. appearance 示例："20岁女大学生，黑色长发扎马尾，大眼睛双眼皮，皮肤白皙，身材纤细，穿白色T恤和浅蓝色牛仔裤，戴银色项链"
+- 每个 shot 的 visual 描述中，必须引用对应角色的 appearance 外貌描述，以保证图片生成的一致性
 - dialogue 类型的 shot 必须有 character（角色名）、line（台词）、voiceId（音色）
 - narration 类型的 shot 必须有 subtitle（字幕文本），不需要 voiceId
-- 同一角色在所有镜头中的 voiceId 必须一致
+- 同一角色在所有镜头中的 voiceId 必须一致，appearance 描述也必须一致
 - 每集至少 5-10 个 shots，总时长 30-60 秒
-- sceneDescription 中要包含完整的环境描述，画风：${STYLE_IMAGE_PROMPT[style]}`;
+- sceneDescription 中要包含完整的环境描述，画风：${STYLE_IMAGE_PROMPT[style]}
+
+## 角色描述 JSON 格式示例
+{ "name": "苏小暖", "description": "女主角，活泼开朗", "voiceId": "zh-CN-XiaoxiaoNeural", "appearance": "20岁女大学生，黑色长发扎马尾，大眼睛双眼皮，皮肤白皙，身材纤细，穿白色T恤和浅蓝色牛仔裤，戴银色项链" }`;
 
   const userPrompt = `请创作一部短剧。
 主题：${theme}

@@ -263,7 +263,7 @@ export default function ScriptPageContent() {
                   <h2 className="text-base sm:text-lg font-semibold">角色列表</h2>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {scriptV2.characters.map((char, idx) => (
+                  {characters.map((char, idx) => (
                     <div
                       key={idx}
                       className="border border-border/50 rounded-lg p-3 sm:p-4 bg-card/50"
@@ -277,6 +277,36 @@ export default function ScriptPageContent() {
                       <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed">
                         {char.description}
                       </p>
+                      <div className="mt-2 pt-2 border-t border-border/30">
+                        <p className="text-xs text-muted-foreground/70 mb-1">🎨 外貌描述（用于图片生成一致性）</p>
+                        <textarea
+                          className="w-full text-xs sm:text-sm text-amber-300/80 leading-relaxed bg-transparent border border-border/30 rounded p-2 resize-y min-h-[3rem] focus:outline-none focus:border-emerald-500/50"
+                          value={char.appearance || ""}
+                          placeholder="描述角色的固定外貌特征（发型、服装、体型、配饰等），确保不同镜头中角色外观一致"
+                          onChange={(e) => {
+                            const updated = [...characters];
+                            updated[idx] = { ...updated[idx], appearance: e.target.value };
+                            setCharacters(updated);
+                            // Also update scriptV2
+                            if (scriptV2) {
+                              setScriptV2({ ...scriptV2, characters: updated });
+                            }
+                          }}
+                          onBlur={async () => {
+                            // Auto-save character appearance changes to backend
+                            if (!dramaId) return;
+                            try {
+                              await fetch(`/api/dramas/${dramaId}`, {
+                                method: "PUT",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ characters: characters }),
+                              });
+                            } catch {
+                              // Silent fail for auto-save
+                            }
+                          }}
+                        />
+                      </div>
                     </div>
                   ))}
                 </div>

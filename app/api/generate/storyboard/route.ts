@@ -8,8 +8,55 @@ import { generateImage } from "@/lib/ai/image-generator";
 import { uploadFileToCos, imageCosKey } from "@/lib/ai/cos-storage";
 import path from "path";
 import fs from "fs/promises";
-import type { Shot } from "@/types/drama";
+import type { Shot, Character } from "@/types/drama";
 import { checkCredits, deductCredits, CREDIT_COSTS } from "@/lib/credits";
+
+/**
+ * Build appearance-enriched prompt for a shot.
+ * If the shot references a character and that character has an appearance,
+ * prepend the appearance description to the visual prompt.
+ */
+function buildAppearancePrompt(
+  shot: Shot,
+  characters: Character[]
+): string {
+  if (!shot.visual) return shot.visual || "";
+
+  // Find character appearances to include
+  const referencedCharacters: Character[] = [];
+
+  if (shot.type === "dialogue" && shot.character) {
+    const char = characters.find(
+      (c) => c.name === shot.character
+    );
+    if (char) referencedCharacters.push(char);
+  }
+
+  // Also try to find characters mentioned by name in the visual text
+  for (const char of characters) {
+    if (
+      char.appearance &&
+      !referencedCharacters.includes(char) &&
+      shot.visual.includes(char.name)
+    ) {
+      referencedCharacters.push(char);
+    }
+  }
+
+  if (referencedCharacters.length === 0) {
+    return shot.visual;
+  }
+
+  // Prepend character appearances
+  const appearanceDescs = referencedCharacters
+    .filter((c) => c.appearance)
+    .map((c) => c.appearance)
+    .join("。");
+
+  if (!appearanceDescs) return shot.visual;
+
+  return `${appearanceDescs}。${shot.visual}`;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -55,7 +102,8 @@ export async function POST(request: NextRequest) {
 
       // V2: shot-based image generation
       if (episode.shotData && Array.isArray(episode.shotData)) {
-        const shotResult = await handleShotStoryboard(episode, drama[0].style, dramaId, uploadDir);
+        const characters: Character[] = Array.isArray(drama[0].characters) ? drama[0].characters : [];
+        const shotResult = await handleShotStoryboard(episode, drama[0].style, dramaId, uploadDir, characters);
         return NextResponse.json(shotResult);
       }
 
@@ -116,7 +164,8 @@ export async function POST(request: NextRequest) {
       try {
         // V2: shot-based
         if (episode.shotData && Array.isArray(episode.shotData)) {
-          const result = await handleShotStoryboard(episode, drama[0].style, dramaId, uploadDir);
+          const characters: Character[] = Array.isArray(drama[0].characters) ? drama[0].characters : [];
+          const result = await handleShotStoryboard(episode, drama[0].style, dramaId, uploadDir, characters);
           results.push(result);
           continue;
         }
@@ -184,7 +233,8 @@ async function handleShotStoryboard(
   episode: { id: string; episodeNumber: number; shotData: unknown },
   style: string | null,
   dramaId: string,
-  uploadDir: string
+  uploadDir: string,
+  characters: Character[] = []
 ): Promise<{ episodeNumber: number; imageUrl: string; shotImages: { shotNumber: number; imageUrl: string }[] }> {
   const shots = episode.shotData as unknown as Shot[];
   const shotImages: { shotNumber: number; imageUrl: string }[] = [];
@@ -192,8 +242,11 @@ async function handleShotStoryboard(
   // Generate image for each shot's visual description
   for (const shot of shots) {
     try {
+      // Build appearance-enriched prompt for consistent character look
+      const enrichedPrompt = buildAppearancePrompt(shot, characters);
+
       const imageUrl = await generateImage(
-        shot.visual,
+        enrichedPrompt,
         style || "realistic",
         "1280x720"
       );

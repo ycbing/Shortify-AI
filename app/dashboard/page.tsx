@@ -290,11 +290,22 @@ function DramaCardWithActions({ drama, onDelete, onCopy, copying }: DramaCardPro
   const dramaEpisodes = drama.episodes || [];
   const completedSteps = getCompletedSteps(drama.status, dramaEpisodes);
 
-  /** Convert local path to public URL */
+  /** Convert storage path to public-accessible URL */
   const toImgUrl = (p: string | null) => {
     if (!p) return null;
+    // COS private bucket URL → route through signed proxy
+    if (p.includes(".cos.")) {
+      try {
+        const u = new URL(p);
+        const cosKey = u.pathname.slice(1);
+        return `/api/uploads/cos/${encodeURIComponent(cosKey)}`;
+      } catch {
+        return p;
+      }
+    }
+    // External URLs (e.g. expired UCloud links) — skip, will show broken
     if (p.startsWith("http")) return p;
-    if (p.includes(".cos.")) return p;
+    // Local relative path
     return `/api/uploads/${p.replace(/^\.?\/?uploads\/?/, "")}`;
   };
 

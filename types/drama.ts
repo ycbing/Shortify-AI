@@ -35,6 +35,10 @@ export interface Character {
   name: string;
   description: string;
   voiceId: string;
+  /** Fixed appearance description for consistent image generation (e.g. "20岁女大学生，黑色长发扎马尾，穿白色T恤") */
+  appearance?: string;
+  /** Personality traits (optional, for richer character portrayal) */
+  personality?: string;
 }
 
 export interface Shot {

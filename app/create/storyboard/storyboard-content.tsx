@@ -16,6 +16,7 @@ const steps = [
 ];
 
 interface StoryboardItem {
+  id: string;
   episodeNumber: number;
   title: string;
   imageUrl: string | null;
@@ -43,7 +44,8 @@ export default function StoryboardPageContent() {
       if (res.ok) {
         const data = await res.json();
         setItems(
-          data.episodes.map((ep: { episodeNumber: number; title: string; imageUrl: string | null; narrationText: string }) => ({
+          data.episodes.map((ep: { id: string; episodeNumber: number; title: string; imageUrl: string | null; narrationText: string }) => ({
+            id: ep.id,
             episodeNumber: ep.episodeNumber,
             title: ep.title || `第${ep.episodeNumber}集`,
             imageUrl: ep.imageUrl
@@ -84,7 +86,8 @@ export default function StoryboardPageContent() {
       const res = await fetch(`/api/dramas/${dramaId}`);
       if (res.ok) {
         const data = await res.json();
-        return data.episodes.map((ep: { episodeNumber: number; title: string; imageUrl: string | null; narrationText: string }) => ({
+        return data.episodes.map((ep: { id: string; episodeNumber: number; title: string; imageUrl: string | null; narrationText: string }) => ({
+          id: ep.id,
           episodeNumber: ep.episodeNumber,
           title: ep.title || `第${ep.episodeNumber}集`,
           imageUrl: ep.imageUrl,
@@ -128,7 +131,7 @@ export default function StoryboardPageContent() {
         const res = await fetch("/api/generate/storyboard", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ dramaId, episodeId: allEpisodes[i].episodeNumber }),
+          body: JSON.stringify({ dramaId, episodeId: allEpisodes[i].id }),
         });
         if (!res.ok) {
           setError(`第 ${allEpisodes[i].episodeNumber} 集分镜生成失败`);
@@ -154,7 +157,7 @@ export default function StoryboardPageContent() {
       const res = await fetch("/api/generate/storyboard", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dramaId, episodeId: ep.episodeNumber }),
+        body: JSON.stringify({ dramaId, episodeId: ep.id }),
       });
 
       if (res.ok) {
