@@ -4,6 +4,11 @@ import path from "path";
 import fs from "fs/promises";
 import type { Shot, ShotAudio } from "@/types/drama";
 import { NARRATION_VOICE } from "@/types/drama";
+import {
+  xunfeiTts,
+  isXunfeiConfigured,
+  mapVoiceId,
+} from "@/lib/ai/xunfei-tts";
 
 const execAsync = promisify(exec);
 
@@ -13,7 +18,7 @@ export interface VoiceoverResult {
   text: string;
 }
 
-// ============ Legacy: single-voice narration ============
+// ============ Core TTS function (iFlytek → Edge-TTS fallback) ============
 
 export async function generateVoiceover(
   text: string,
@@ -25,6 +30,17 @@ export async function generateVoiceover(
   const dir = path.dirname(outputPath);
   await fs.mkdir(dir, { recursive: true });
 
+  // Prefer iFlytek (commercial, stable)
+  if (isXunfeiConfigured()) {
+    try {
+      const xfyVoice = mapVoiceId(voice);
+      return await xunfeiTts(text, outputPath, xfyVoice);
+    } catch (err) {
+      console.warn("iFlytek TTS failed, falling back to Edge-TTS:", err instanceof Error ? err.message : err);
+    }
+  }
+
+  // Fallback: Edge-TTS
   const escapedText = text.replace(/"/g, '\\"').replace(/\n/g, " ");
   const cmd = `edge-tts --voice "${voice}" --rate="${rate}" --pitch="${pitch}" --text "${escapedText}" --write-media "${outputPath}"`;
 
