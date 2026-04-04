@@ -97,7 +97,7 @@ export default function CreatePage() {
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b border-border/50 bg-background/80 backdrop-blur-xl sticky top-0 z-40">
-        <div className="mx-auto max-w-3xl flex items-center justify-between px-4 h-14 sm:h-16">
+        <div className="mx-auto max-w-6xl flex items-center justify-between px-4 h-14 sm:h-16">
           <StepIndicator currentStep={1} steps={steps} />
         </div>
       </header>

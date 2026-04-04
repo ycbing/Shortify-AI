@@ -199,12 +199,12 @@ export default function ScriptPageContent() {
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b border-border/50 bg-background/80 backdrop-blur-xl sticky top-0 z-40">
-        <div className="mx-auto max-w-3xl flex items-center justify-between px-4 h-14 sm:h-16">
+        <div className="mx-auto max-w-6xl flex items-center justify-between px-4 h-14 sm:h-16">
           <StepIndicator currentStep={2} steps={steps} />
         </div>
       </header>
 
-      <main className="mx-auto max-w-3xl px-4 py-8 sm:py-10">
+      <main className="mx-auto max-w-6xl px-4 py-8 sm:py-10">
         {/* Step hint */}
         <div className="mb-6 sm:mb-8 p-3 sm:p-4 rounded-lg bg-emerald-500/5 border border-emerald-500/20">
           <p className="text-xs sm:text-sm text-emerald-400">

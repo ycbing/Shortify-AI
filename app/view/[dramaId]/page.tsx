@@ -199,6 +199,21 @@ export default function ViewDramaPage() {
     error: "生成失败",
   };
 
+  const getEditorUrl = () => {
+    switch (drama.status) {
+      case "draft":
+      case "generating":
+      case "script_ready":
+        return `/create/script?dramaId=${dramaId}`;
+      case "storyboard_ready":
+        return `/create/storyboard?dramaId=${dramaId}`;
+      case "voiceover_ready":
+      case "completed":
+      default:
+        return `/create/preview?dramaId=${dramaId}`;
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
@@ -219,7 +234,7 @@ export default function ViewDramaPage() {
               <Share2 className="h-3.5 w-3.5 mr-1.5" />
               分享
             </Button>
-            <Link href={`/create/editor/${dramaId}`}>
+            <Link href={getEditorUrl()}>
               <Button variant="outline" size="sm">
                 <Edit3 className="h-3.5 w-3.5 mr-1.5" />
                 编辑
