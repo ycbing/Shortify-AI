@@ -13,7 +13,7 @@ export const CREDIT_COSTS = {
   storyboard: 5,     // 生成分镜图片（每集）
   voiceover: 5,      // 生成配音（每集）
   compose: 5,        // 合成视频（每集）
-  video: 20,         // AI 视频生成（每镜头）
+  video: 20,         // AI 视频生成（每个镜头）
 } as const;
 
 export type CreditType = keyof typeof CREDIT_COSTS;

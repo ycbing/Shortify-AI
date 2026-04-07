@@ -45,10 +45,9 @@ export async function submitVideoGeneration(
     : `${prompt}。画面风格：${stylePrompt}。宽屏16:9构图，电影感画面。`;
 
   const body: Record<string, unknown> = {
-    model: "cogvideox-flash",
+    model: process.env.VIDEO_MODEL || "cogvideox-3",
     prompt: fullPrompt,
     size: "1280x720",
-    fps: 24,
   };
 
   if (imageUrl) {

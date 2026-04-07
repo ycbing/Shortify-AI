@@ -54,20 +54,22 @@ export default function PreviewPageContent() {
   const [episodes, setEpisodes] = useState<EpisodeData[]>([]);
   const [mergedVideoUrl, setMergedVideoUrl] = useState<string | null>(null);
   const [dramaTitle, setDramaTitle] = useState<string>("");
+  const [dramaStatus, setDramaStatus] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [loadingAction, setLoadingAction] = useState("");
   const [actionProgress, setActionProgress] = useState({ current: 0, total: 0 });
   const [error, setError] = useState("");
 
-  const fetchEpisodes = useCallback(async () => {
+  const fetchEpisodes = useCallback(async (showLoading = true) => {
     if (!dramaId) return;
-    setLoading(true);
+    if (showLoading) setLoading(true);
 
     try {
       const res = await fetch(`/api/dramas/${dramaId}`);
       if (res.ok) {
         const data = await res.json();
         setDramaTitle(data.title || "");
+        setDramaStatus(data.status || "");
         const processedEpisodes = (data.episodes || []).map((ep: EpisodeData) => ({
           ...ep,
           voiceoverUrl: toPublicUrl(ep.voiceoverUrl),
@@ -83,7 +85,7 @@ export default function PreviewPageContent() {
       setError("加载失败");
       toast.error("网络错误，请刷新页面重试");
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   }, [dramaId]);
 
@@ -94,6 +96,17 @@ export default function PreviewPageContent() {
     }
     fetchEpisodes();
   }, [dramaId]);
+
+  // Auto-resume polling if drama is in generating state (e.g. page refresh)
+  useEffect(() => {
+    if (!dramaId || !episodes.length) return;
+    // Only resume if drama status is actually "generating"
+    const isGenerating = dramaStatus === "generating";
+    if (isGenerating && loadingAction !== "video-gen") {
+      setLoadingAction("video-gen");
+      pollVideoProgress();
+    }
+  }, [dramaId, dramaStatus]);
 
   const handleGenerateAllVoiceovers = async () => {
     if (!dramaId) return;
@@ -213,10 +226,9 @@ export default function PreviewPageContent() {
   };
 
   const handleGenerateVideos = async () => {
-    if (!dramaId) return;
+    if (!dramaId || loadingAction === "video-gen") return;
     setLoadingAction("video-gen");
     setError("");
-
     try {
       const res = await fetch("/api/generate/video", {
         method: "POST",
@@ -240,7 +252,6 @@ export default function PreviewPageContent() {
     } catch {
       setError("视频生成失败");
       toast.error("网络错误，请重试");
-    } finally {
       setLoadingAction("");
     }
   };
@@ -252,16 +263,37 @@ export default function PreviewPageContent() {
 
     const poll = async () => {
       attempts++;
-      await fetchEpisodes();
+      await fetchEpisodes(false);
 
-      const completed = episodes.filter((ep) => ep.videoUrl).length;
-      setActionProgress({ current: completed, total: episodes.length });
+      // Fetch fresh data to check completion
+      try {
+        const res = await fetch(`/api/dramas/${dramaId}`);
+        if (res.ok) {
+          const data = await res.json();
+          const eps = data.episodes || [];
+          // Count episodes that have videoUrl (AI-generated video)
+          const episodesWithShots = eps.filter((ep: any) => {
+            const shots = Array.isArray(ep.shotData) ? ep.shotData : [];
+            return shots.length > 0;
+          });
+          const completed = episodesWithShots.filter((ep: any) => !!ep.videoUrl).length;
+          setActionProgress({ current: completed, total: episodesWithShots.length });
 
-      const allDone = episodes.every((ep) => ep.videoUrl);
-      if (allDone || attempts >= maxAttempts) {
-        setLoadingAction("");
-        setActionProgress({ current: 0, total: 0 });
-        return;
+          const allDone = episodesWithShots.every((ep: any) => !!ep.videoUrl);
+          if (allDone || attempts >= maxAttempts) {
+            setLoadingAction("");
+            setActionProgress({ current: 0, total: 0 });
+            if (allDone) {
+              toast.success("AI 视频生成完成！");
+              await fetchEpisodes(false);
+            } else {
+              toast.warning("AI 视频生成超时，部分集可能未完成");
+            }
+            return;
+          }
+        }
+      } catch {
+        // ignore poll errors
       }
 
       setTimeout(poll, 5000);
@@ -413,22 +445,32 @@ export default function PreviewPageContent() {
                 <div className="flex items-center gap-2 mb-2">
                   <Film className="h-5 w-5 text-emerald-400" />
                   <h3 className="font-semibold text-sm sm:text-base">AI 视频生成</h3>
-                  <span className="text-xs bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded hidden sm:inline">CogVideoX Flash</span>
+                  <span className="text-xs bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded hidden sm:inline">CogVideoX-3</span>
                 </div>
                 <p className="text-xs sm:text-sm text-muted-foreground mb-4">
-                  使用智谱 AI 将每集分镜图片生成动态短视频。每集约需 1-3 分钟。
+                  使用 CogVideoX-3 将每个分镜镜头生成 AI 动态视频，再自动拼接成完整剧集。每个镜头 20 积分。
                 </p>
                 <div className="space-y-2 mb-4 sm:mb-6">
-                  {episodes.map((ep) => (
+                  {episodes.map((ep) => {
+                    const epData = ep as any;
+                    const shots = Array.isArray(epData.shotData) ? epData.shotData : [];
+                    const hasVideo = ep.videoUrl;
+                    const isGenerating = loadingAction === "video-gen" && shots.length > 0 && !hasVideo;
+                    return (
                     <div key={ep.id} className="flex items-center gap-2 sm:gap-3 text-xs sm:text-sm">
-                      <span className="w-12 sm:w-16 shrink-0">EP{ep.episodeNumber}</span>
-                      <span className={`w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full shrink-0 ${ep.imageUrl ? "bg-emerald-500" : "bg-red-500"}`} />
-                      <span className="text-xs text-muted-foreground hidden sm:inline">分镜</span>
-                      <span className={`w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full shrink-0 ${ep.videoUrl ? "bg-emerald-500" : "bg-zinc-600"}`} />
-                      <span className="text-xs text-muted-foreground hidden sm:inline">AI视频</span>
-                      {ep.videoUrl && <span className="text-xs text-emerald-400 inline-flex items-center gap-0.5"><Check className="h-3 w-3" /> 已生成</span>}
+                      <span className="w-12 sm:w-16 shrink-0 font-medium">EP{ep.episodeNumber}</span>
+                      {hasVideo ? (
+                        <span className="text-xs text-emerald-400 inline-flex items-center gap-0.5"><Check className="h-3 w-3" /> 已完成</span>
+                      ) : isGenerating ? (
+                        <span className="text-xs text-amber-400 inline-flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" /> 生成中...</span>
+                      ) : shots.length > 0 ? (
+                        <span className="text-xs text-zinc-500">待生成</span>
+                      ) : (
+                        <span className="text-xs text-zinc-600">无分镜</span>
+                      )}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
                 <Button
                   onClick={handleGenerateVideos}
@@ -438,7 +480,9 @@ export default function PreviewPageContent() {
                   {loadingAction === "video-gen" ? (
                     <>
                       <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      视频生成中，请稍候...
+                      {actionProgress.total > 0
+                        ? `AI 视频生成中 ${actionProgress.current}/${actionProgress.total} 集...`
+                        : "AI 视频生成中..."}
                     </>
                   ) : (
                     <>

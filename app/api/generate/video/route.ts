@@ -8,13 +8,20 @@ import {
   submitVideoGeneration,
   waitForVideoCompletion,
   downloadVideo,
-  imageToBase64,
 } from "@/lib/ai/video-generator";
-import { uploadFileToCos, aiVideoCosKey } from "@/lib/ai/cos-storage";
+import {
+  uploadFileToCos,
+  getSignedCosUrl,
+  isCosConfigured,
+  uploadToCos,
+  aiVideoCosKey,
+  videoCosKey,
+} from "@/lib/ai/cos-storage";
 import type { Shot } from "@/types/drama";
 import path from "path";
 import fs from "fs/promises";
 import { checkCredits, deductCredits, CREDIT_COSTS } from "@/lib/credits";
+import { execSync } from "child_process";
 
 export async function POST(request: NextRequest) {
   try {
@@ -55,19 +62,40 @@ export async function POST(request: NextRequest) {
         .orderBy(episodes.episodeNumber);
     }
 
-    // Estimate total shots for credit check
-    const totalShots = targetEpisodes.reduce((sum, ep) => {
-      if (ep.shotData && Array.isArray(ep.shotData)) {
-        return sum + (ep.shotData as unknown as Shot[]).length;
+    // Count total shots needing generation across all episodes
+    let totalShotsNeeded = 0;
+    const episodesNeedingVideo: typeof targetEpisodes = [];
+
+    for (const ep of targetEpisodes) {
+      const shots = ep.shotData as Shot[];
+      if (!Array.isArray(shots) || shots.length === 0) continue;
+
+      // Check if all shots already have aiVideoUrl
+      const shotsNeeding = shots.filter((s) => !s.aiVideoUrl);
+      if (shotsNeeding.length > 0) {
+        totalShotsNeeded += shotsNeeding.length;
+        episodesNeedingVideo.push(ep);
       }
-      return sum + 1; // V1 fallback: 1 shot per episode
-    }, 0);
-    const totalVideoCredits = totalShots * CREDIT_COSTS.video;
+    }
+
+    if (totalShotsNeeded === 0) {
+      return NextResponse.json({
+        message: "所有镜头已有 AI 视频，无需生成",
+        episodeCount: 0,
+        shotCount: 0,
+      });
+    }
+
+    // Credit check: 20 credits per shot
+    const totalVideoCredits = totalShotsNeeded * CREDIT_COSTS.video;
 
     const videoCreditCheck = await checkCredits(session.user.id, totalVideoCredits);
     if (!videoCreditCheck.ok) {
       return NextResponse.json(
-        { error: `积分不足，AI 视频生成需要 ${totalVideoCredits} 积分（${totalShots} 个镜头 × ${CREDIT_COSTS.video} 积分），当前余额 ${videoCreditCheck.balance} 积分`, code: "INSUFFICIENT_CREDITS" },
+        {
+          error: `积分不足，AI 视频生成需要 ${totalVideoCredits} 积分（${totalShotsNeeded} 个镜头 × ${CREDIT_COSTS.video} 积分），当前余额 ${videoCreditCheck.balance} 积分`,
+          code: "INSUFFICIENT_CREDITS",
+        },
         { status: 402 }
       );
     }
@@ -85,19 +113,20 @@ export async function POST(request: NextRequest) {
       dramaId,
       type: "video",
       status: "processing",
-      inputData: { episodeCount: targetEpisodes.length },
+      inputData: { episodeCount: episodesNeedingVideo.length, shotCount: totalShotsNeeded },
       startedAt: new Date(),
     });
 
-    // Process in background (don't await all)
-    processVideos(dramaId, targetEpisodes, drama[0].style || "realistic", taskId).catch(
+    // Process in background
+    processVideos(dramaId, episodesNeedingVideo, drama[0].style || "realistic", taskId, session.user.id).catch(
       console.error
     );
 
     return NextResponse.json({
       taskId,
-      message: `正在为 ${targetEpisodes.length} 集生成 AI 视频，请稍候...`,
-      episodeCount: targetEpisodes.length,
+      message: `正在为 ${totalShotsNeeded} 个镜头生成 AI 视频（${episodesNeedingVideo.length} 集），请稍候...`,
+      episodeCount: episodesNeedingVideo.length,
+      shotCount: totalShotsNeeded,
     });
   } catch (error) {
     console.error("Video generation failed:", error);
@@ -108,153 +137,232 @@ export async function POST(request: NextRequest) {
   }
 }
 
+/**
+ * Find the local image file for a specific shot.
+ * Looks in uploads/images/{dramaId}/episode-{epNum}/shot-{shotNumber}.{jpg,png}
+ */
+async function findShotImage(
+  dramaId: string,
+  epNum: number,
+  shotNumber: number
+): Promise<string | undefined> {
+  const uploadDir = path.resolve(process.env.UPLOAD_DIR || "./uploads");
+  const shotImageDir = path.join(uploadDir, "images", dramaId, `episode-${epNum}`);
+
+  for (const ext of [".jpg", ".jpeg", ".png", ".webp"]) {
+    const candidate = path.join(shotImageDir, `shot-${shotNumber}${ext}`);
+    try {
+      await fs.access(candidate);
+      return candidate;
+    } catch {
+      // not found, try next extension
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Upload a shot image to COS and return a signed URL.
+ */
+async function uploadShotImageAndGetSignedUrl(
+  imagePath: string,
+  dramaId: string,
+  epNum: number,
+  shotNumber: number
+): Promise<string | undefined> {
+  // If COS is configured, upload and get signed URL
+  if (isCosConfigured()) {
+    try {
+      const cosKey = `${dramaId}/images/episode-${epNum}/shot-${shotNumber}.jpg`;
+      await uploadToCos(imagePath, cosKey);
+      return getSignedCosUrl(cosKey, 3600);
+    } catch (err) {
+      console.warn(`Failed to upload shot image to COS: shot-${shotNumber}`, err);
+    }
+  }
+
+  // Fallback: return local path (won't work for CogVideoX API, but logged)
+  console.warn(`COS not configured or upload failed, shot image may not work: ${imagePath}`);
+  return undefined;
+}
+
+/**
+ * Concatenate multiple video files using ffmpeg concat demuxer.
+ * All videos must have the same codec/parameters.
+ */
+async function concatVideos(
+  videoPaths: string[],
+  outputDir: string,
+  epNum: number
+): Promise<string> {
+  await fs.mkdir(outputDir, { recursive: true });
+
+  const outputPath = path.join(outputDir, `episode-${epNum}-concat.mp4`);
+  const listFile = path.join(outputDir, `concat-list-${epNum}.txt`);
+
+  // Write concat list file (ffmpeg concat demuxer format)
+  const lines = videoPaths.map((p) => `file '${p}'`).join("\n");
+  await fs.writeFile(listFile, lines);
+
+  try {
+    // Use concat demuxer - re-encode to ensure compatible formats
+    execSync(
+      `ffmpeg -y -f concat -safe 0 -i "${listFile}" -c copy "${outputPath}"`,
+      { timeout: 120000 }
+    );
+  } catch (err) {
+    // If concat copy fails (different codecs), re-encode
+    console.warn(`Concat copy failed, re-encoding episode ${epNum}...`, err);
+    execSync(
+      `ffmpeg -y -f concat -safe 0 -i "${listFile}" -c:v libx264 -preset fast -crf 23 -c:a aac -movflags +faststart "${outputPath}"`,
+      { timeout: 300000 }
+    );
+  }
+
+  // Cleanup list file
+  try {
+    await fs.unlink(listFile);
+  } catch {
+    // ignore
+  }
+
+  return outputPath;
+}
+
 async function processVideos(
   dramaId: string,
   episodesList: typeof episodes.$inferSelect[],
   style: string,
-  taskId: string
+  taskId: string,
+  userId: string
 ) {
   const uploadDir = path.resolve(process.env.UPLOAD_DIR || "./uploads");
   const results: {
     episodeNumber: number;
-    shotsProcessed: number;
-    shotsFailed: number;
+    success: boolean;
+    shotsGenerated: number;
+    shotsSkipped: number;
     error?: string;
   }[] = [];
 
+  let totalCreditsUsed = 0;
+
   for (const episode of episodesList) {
     const epNum = episode.episodeNumber;
-    let shotsProcessed = 0;
-    let shotsFailed = 0;
+    const shots = (episode.shotData as Shot[]).slice(); // shallow clone
 
-    try {
-      // Only process V2 shot-based episodes
-      if (!episode.shotData || !Array.isArray(episode.shotData)) {
-        results.push({
-          episodeNumber: epNum,
-          shotsProcessed: 0,
-          shotsFailed: 0,
-          error: "跳过：非 V2 shot 格式",
-        });
+    if (!Array.isArray(shots) || shots.length === 0) {
+      results.push({
+        episodeNumber: epNum,
+        success: false,
+        shotsGenerated: 0,
+        shotsSkipped: 0,
+        error: "跳过：无分镜数据",
+      });
+      continue;
+    }
+
+    const shotVideoPaths: string[] = [];
+    let shotsGenerated = 0;
+    let shotsSkipped = 0;
+
+    for (const shot of shots) {
+      // Skip shots that already have aiVideoUrl
+      if (shot.aiVideoUrl) {
+        shotsSkipped++;
+        console.log(`Episode ${epNum} Shot ${shot.shotNumber}: already has aiVideoUrl, skipping`);
         continue;
       }
 
-      const shots = episode.shotData as Shot[];
-
-      // Output directory for AI videos
-      const aiVideoDir = path.join(
-        uploadDir,
-        "videos",
-        dramaId,
-        `episode-${epNum}-ai`
-      );
-
-      for (const shot of shots) {
-        // Skip shots that already have AI video
-        if (shot.aiVideoUrl) {
-          console.log(
-            `Episode ${epNum} shot ${shot.shotNumber}: AI video already exists, skipping`
-          );
-          shotsProcessed++;
-          continue;
-        }
-
-        // Find shot image on disk
-        const shotImageDir = path.join(
-          uploadDir,
-          "images",
-          dramaId,
-          `episode-${epNum}`
-        );
-        let shotImagePath: string | null = null;
-
-        for (const ext of [".jpg", ".jpeg", ".png"]) {
-          const candidate = path.join(
-            shotImageDir,
-            `shot-${shot.shotNumber}${ext}`
-          );
-          try {
-            await fs.access(candidate);
-            shotImagePath = candidate;
-            break;
-          } catch {
-            // not found
-          }
-        }
-
+      try {
+        // 1. Find the shot's storyboard image
+        const shotImagePath = await findShotImage(dramaId, epNum, shot.shotNumber);
         if (!shotImagePath) {
-          console.warn(
-            `Episode ${epNum} shot ${shot.shotNumber}: no image found, skipping`
-          );
-          shotsFailed++;
+          console.warn(`Episode ${epNum} Shot ${shot.shotNumber}: no image found, skipping`);
           continue;
         }
 
-        try {
-          // Build prompt from shot subtitle or line
-          const prompt =
-            shot.subtitle || shot.line || shot.visual || "电影场景";
-
-          // Convert local image to base64 for CogVideoX API
-          const imageBase64 = await imageToBase64(shotImagePath);
-
-          // Submit video generation
-          const { taskId: videoTaskId } = await submitVideoGeneration(
-            prompt,
-            imageBase64,
-            style
-          );
-
-          // Wait for completion (max 5 min per shot)
-          const result = await waitForVideoCompletion(videoTaskId, 300000, 5000);
-
-          // Download video to local
-          const localVideoPath = path.join(
-            aiVideoDir,
-            `shot-${shot.shotNumber}.mp4`
-          );
-          await downloadVideo(result.videoUrl, localVideoPath);
-
-          // Upload to COS if configured
-          const cosKey = aiVideoCosKey(dramaId, epNum, shot.shotNumber);
-          const finalVideoUrl = await uploadFileToCos(localVideoPath, cosKey);
-
-          // Update shot's aiVideoUrl in the episode's shotData
-          shot.aiVideoUrl = finalVideoUrl;
-
-          console.log(
-            `Episode ${epNum} shot ${shot.shotNumber}: AI video saved to ${localVideoPath}`
-          );
-          shotsProcessed++;
-        } catch (err) {
-          console.error(
-            `Episode ${epNum} shot ${shot.shotNumber}: generation failed`,
-            err
-          );
-          shotsFailed++;
+        // 2. Upload image to COS and get signed URL
+        const signedImageUrl = await uploadShotImageAndGetSignedUrl(shotImagePath, dramaId, epNum, shot.shotNumber);
+        if (!signedImageUrl) {
+          console.warn(`Episode ${epNum} Shot ${shot.shotNumber}: could not get signed image URL, skipping`);
+          continue;
         }
-      }
 
-      // Save updated shotData back to database
+        // 3. Build prompt from shot data
+        const prompt = shot.subtitle || shot.line || shot.visual || "电影场景";
+        console.log(`Episode ${epNum} Shot ${shot.shotNumber}: generating AI video (prompt: ${prompt.substring(0, 50)}...)`);
+
+        // 4. Submit video generation (no fps, no duration - cogvideox-3 doesn't support them)
+        const { taskId: videoTaskId } = await submitVideoGeneration(prompt, signedImageUrl, style);
+        console.log(`Episode ${epNum} Shot ${shot.shotNumber}: video task submitted: ${videoTaskId}`);
+
+        // 5. Wait for completion (max 5 min per shot)
+        const result = await waitForVideoCompletion(videoTaskId, 300000, 5000);
+
+        // 6. Download video to local
+        const localVideoDir = path.join(uploadDir, "videos", dramaId, `episode-${epNum}-ai`);
+        const localVideoPath = path.join(localVideoDir, `shot-${shot.shotNumber}.mp4`);
+        await downloadVideo(result.videoUrl, localVideoPath);
+
+        shotVideoPaths.push(localVideoPath);
+
+        // 7. Upload video to COS
+        const cosKey = aiVideoCosKey(dramaId, epNum, shot.shotNumber);
+        const cosUrl = await uploadFileToCos(localVideoPath, cosKey);
+        shot.aiVideoUrl = cosUrl;
+
+        // Deduct credits per shot
+        await deductCredits(userId, "video", CREDIT_COSTS.video, dramaId, `AI 视频生成：第 ${epNum} 集 镜头 ${shot.shotNumber}`);
+        totalCreditsUsed += CREDIT_COSTS.video;
+
+        shotsGenerated++;
+        console.log(`Episode ${epNum} Shot ${shot.shotNumber}: AI video saved: ${cosUrl}`);
+      } catch (err) {
+        console.error(`Failed to generate video for Episode ${epNum} Shot ${shot.shotNumber}:`, err);
+        // Continue with next shot instead of failing the whole episode
+      }
+    }
+
+    // Save updated shotData to database
+    try {
       await db
         .update(episodes)
-        .set({ shotData: shots as unknown as Record<string, unknown> })
+        .set({ shotData: shots })
         .where(eq(episodes.id, episode.id));
-
-      results.push({
-        episodeNumber: epNum,
-        shotsProcessed,
-        shotsFailed,
-      });
+      console.log(`Episode ${epNum}: shotData saved with ${shotsGenerated} new AI videos`);
     } catch (err) {
-      console.error(`Failed to process episode ${epNum}:`, err);
-      results.push({
-        episodeNumber: epNum,
-        shotsProcessed,
-        shotsFailed,
-        error: err instanceof Error ? err.message : "处理失败",
-      });
+      console.error(`Failed to save shotData for Episode ${epNum}:`, err);
     }
+
+    // 8. If we generated any shot videos, concat them into a full episode video
+    if (shotVideoPaths.length > 0) {
+      try {
+        const outputDir = path.join(uploadDir, "videos", dramaId, `episode-${epNum}-ai`);
+        const episodeVideoPath = await concatVideos(shotVideoPaths, outputDir, epNum);
+
+        // Upload the concatenated video to COS
+        const cosKey = videoCosKey(dramaId, epNum, "ai-concat.mp4");
+        const finalUrl = await uploadFileToCos(episodeVideoPath, cosKey);
+
+        // Update episode.videoUrl with the concatenated video
+        await db
+          .update(episodes)
+          .set({ videoUrl: finalUrl })
+          .where(eq(episodes.id, episode.id));
+
+        console.log(`Episode ${epNum}: concatenated video saved: ${finalUrl}`);
+      } catch (err) {
+        console.error(`Failed to concat videos for Episode ${epNum}:`, err);
+      }
+    }
+
+    results.push({
+      episodeNumber: epNum,
+      success: shotsGenerated > 0 || shotsSkipped === shots.length,
+      shotsGenerated,
+      shotsSkipped,
+    });
   }
 
   // Update drama and task status
@@ -265,6 +373,10 @@ async function processVideos(
 
   await db
     .update(generationTasks)
-    .set({ status: "completed", outputData: { results }, completedAt: new Date() })
+    .set({
+      status: "completed",
+      outputData: { results, mode: "per-shot", creditsUsed: totalCreditsUsed },
+      completedAt: new Date(),
+    })
     .where(eq(generationTasks.id, taskId));
 }

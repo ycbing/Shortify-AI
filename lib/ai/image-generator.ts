@@ -20,6 +20,11 @@ export async function generateImage(
   const stylePrompt = getStyleImagePrompt(style as "realistic" | "anime" | "ink" | "cyberpunk");
   const fullPrompt = `${prompt}。画面风格：${stylePrompt}。宽屏16:9构图，电影感画面，专业摄影级别。`;
 
+  const model = process.env.IMAGE_MODEL || "cogview-3-plus";
+
+  // glm-image 推荐 1728x960 (16:9)，cogview 系列用 1280x720
+  const imageSize = model.startsWith("glm-image") ? "1728x960" : size;
+
   const response = await fetch(`${COGVIEW_BASE_URL}/images/generations`, {
     method: "POST",
     headers: {
@@ -27,9 +32,9 @@ export async function generateImage(
       Authorization: `Bearer ${GLM_API_KEY}`,
     },
     body: JSON.stringify({
-      model: process.env.IMAGE_MODEL || "cogview-3-plus",
+      model,
       prompt: fullPrompt,
-      size,
+      size: imageSize,
     }),
   });
 
