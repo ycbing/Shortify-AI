@@ -17,11 +17,14 @@ import {
   aiVideoCosKey,
   videoCosKey,
 } from "@/lib/ai/cos-storage";
-import type { Shot } from "@/types/drama";
+import type { Shot, ShotAudio } from "@/types/drama";
 import path from "path";
 import fs from "fs/promises";
 import { checkCredits, deductCredits, CREDIT_COSTS } from "@/lib/credits";
-import { execSync } from "child_process";
+import { execSync, exec } from "child_process";
+import { promisify } from "util";
+
+const execAsync = promisify(exec);
 
 export async function POST(request: NextRequest) {
   try {
@@ -187,46 +190,92 @@ async function uploadShotImageAndGetSignedUrl(
 }
 
 /**
- * Concatenate multiple video files using ffmpeg concat demuxer.
- * All videos must have the same codec/parameters.
+ * Mix voiceover audio into a single AI video shot.
+ * Uses stream_loop to extend video to match audio duration.
+ * Only encodes once here — the result is used directly for concat (stream copy).
  */
-async function concatVideos(
-  videoPaths: string[],
+async function mixAudioToShotVideo(
+  videoPath: string,
+  audioPath: string,
+  outputPath: string
+): Promise<string> {
+  // Get audio duration
+  let audioDuration = 5;
+  try {
+    const { stdout } = await execAsync(
+      `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${audioPath}"`
+    );
+    audioDuration = parseFloat(stdout.trim()) || 5;
+  } catch {
+    // use default
+  }
+
+  const fadeDuration = Math.min(0.3, audioDuration * 0.1);
+
+  // Video loop to audio length, overlay audio, output with consistent codec params
+  // -c:v libx264 -crf 18 for high quality (this is the only encode per shot)
+  const cmd = `ffmpeg -y -stream_loop -1 -i "${videoPath}" -i "${audioPath}" -filter_complex "[0:v]scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black,fade=t=in:st=0:d=${fadeDuration},fade=t=out:st=${Math.max(0, audioDuration - fadeDuration)}:d=${fadeDuration}[v];[1:a]aformat=sample_rates=44100:channel_layouts=stereo[a]" -map "[v]" -map "[a]" -t ${audioDuration} -c:v libx264 -crf 18 -preset fast -pix_fmt yuv420p -c:a aac -b:a 128k -shortest -movflags +faststart "${outputPath}"`;
+
+  await execAsync(cmd, { timeout: 120000 });
+  return outputPath;
+}
+
+/**
+ * Concatenate multiple pre-mixed video files (audio already embedded).
+ * Uses stream copy (no re-encoding) for maximum quality and speed.
+ * Then optionally burns subtitles in a single final pass.
+ */
+async function concatMixedVideos(
+  mixedPaths: string[],
   outputDir: string,
-  epNum: number
+  epNum: number,
+  subtitlePath: string | null
 ): Promise<string> {
   await fs.mkdir(outputDir, { recursive: true });
 
-  const outputPath = path.join(outputDir, `episode-${epNum}-concat.mp4`);
   const listFile = path.join(outputDir, `concat-list-${epNum}.txt`);
-
-  // Write concat list file (ffmpeg concat demuxer format)
-  const lines = videoPaths.map((p) => `file '${p}'`).join("\n");
+  const lines = mixedPaths.map((p) => `file '${p}'`).join("\n");
   await fs.writeFile(listFile, lines);
 
+  // Step 1: Concat with stream copy (NO re-encoding)
+  const rawOutputPath = path.join(outputDir, `episode-${epNum}-raw.mp4`);
   try {
-    // Use concat demuxer - re-encode to ensure compatible formats
     execSync(
-      `ffmpeg -y -f concat -safe 0 -i "${listFile}" -c copy "${outputPath}"`,
+      `ffmpeg -y -f concat -safe 0 -i "${listFile}" -c copy -movflags +faststart "${rawOutputPath}"`,
       { timeout: 120000 }
     );
   } catch (err) {
-    // If concat copy fails (different codecs), re-encode
-    console.warn(`Concat copy failed, re-encoding episode ${epNum}...`, err);
+    // Fallback: re-encode if stream copy fails (different params)
+    console.warn(`Concat copy failed for episode ${epNum}, re-encoding...`, err);
     execSync(
-      `ffmpeg -y -f concat -safe 0 -i "${listFile}" -c:v libx264 -preset fast -crf 23 -c:a aac -movflags +faststart "${outputPath}"`,
+      `ffmpeg -y -f concat -safe 0 -i "${listFile}" -c:v libx264 -preset fast -crf 18 -c:a aac -movflags +faststart "${rawOutputPath}"`,
       { timeout: 300000 }
     );
   }
 
-  // Cleanup list file
-  try {
-    await fs.unlink(listFile);
-  } catch {
-    // ignore
+  await fs.unlink(listFile).catch(() => {});
+
+  // Step 2: Burn subtitles (single re-encode pass only if subtitles exist)
+  let finalOutputPath = rawOutputPath;
+  if (subtitlePath) {
+    try {
+      await fs.access(subtitlePath);
+      const escapedSrtPath = subtitlePath.replace(/'/g, "'\\''");
+      finalOutputPath = path.join(outputDir, `episode-${epNum}.mp4`);
+      execSync(
+        `ffmpeg -y -i "${rawOutputPath}" -vf "subtitles='${escapedSrtPath}'" -c:v libx264 -crf 18 -c:a copy -movflags +faststart "${finalOutputPath}"`,
+        { timeout: 300000 }
+      );
+      if (rawOutputPath !== finalOutputPath) {
+        await fs.unlink(rawOutputPath).catch(() => {});
+      }
+    } catch (err) {
+      console.warn(`Subtitle burn failed for episode ${epNum}, using raw video`, err);
+      finalOutputPath = rawOutputPath;
+    }
   }
 
-  return outputPath;
+  return finalOutputPath;
 }
 
 async function processVideos(
@@ -305,6 +354,21 @@ async function processVideos(
         const localVideoPath = path.join(localVideoDir, `shot-${shot.shotNumber}.mp4`);
         await downloadVideo(result.videoUrl, localVideoPath);
 
+        // 7. Mix voiceover audio into the AI video immediately (one encode pass)
+        const voiceoverPath = path.join(uploadDir, "voiceovers", dramaId, `episode-${epNum}`, `shot-${shot.shotNumber}.mp3`);
+        let mixedVideoPath = localVideoPath;
+        try {
+          await fs.access(voiceoverPath);
+          const mixedPath = path.join(localVideoDir, `shot-${shot.shotNumber}-mixed.mp4`);
+          await mixAudioToShotVideo(localVideoPath, voiceoverPath, mixedPath);
+          // Replace original with mixed version
+          await fs.unlink(localVideoPath).catch(() => {});
+          await fs.rename(mixedPath, localVideoPath);
+          console.log(`Episode ${epNum} Shot ${shot.shotNumber}: audio mixed into video`);
+        } catch (err) {
+          console.warn(`Episode ${epNum} Shot ${shot.shotNumber}: no voiceover or mix failed, using video without audio`, err);
+        }
+
         shotVideoPaths.push(localVideoPath);
 
         // 7. Upload video to COS
@@ -335,25 +399,47 @@ async function processVideos(
       console.error(`Failed to save shotData for Episode ${epNum}:`, err);
     }
 
-    // 8. If we generated any shot videos, concat them into a full episode video
+    // 8. Concat all shot videos (stream copy, no re-encoding) + burn subtitles
     if (shotVideoPaths.length > 0) {
       try {
         const outputDir = path.join(uploadDir, "videos", dramaId, `episode-${epNum}-ai`);
-        const episodeVideoPath = await concatVideos(shotVideoPaths, outputDir, epNum);
 
-        // Upload the concatenated video to COS
+        // Find subtitle file
+        let subtitlePath: string | null = null;
+        const srtPath = path.join(uploadDir, "subtitles", dramaId, `episode-${epNum}.srt`);
+        try {
+          await fs.access(srtPath);
+          subtitlePath = srtPath;
+        } catch {
+          if (episode.subtitleUrl) {
+            try {
+              await fs.access(episode.subtitleUrl);
+              subtitlePath = episode.subtitleUrl;
+            } catch { /* not found */ }
+          }
+        }
+
+        // Concat with stream copy (videos already have audio mixed in)
+        const episodeVideoPath = await concatMixedVideos(
+          shotVideoPaths,
+          outputDir,
+          epNum,
+          subtitlePath
+        );
+
+        // Upload the final video to COS
         const cosKey = videoCosKey(dramaId, epNum, "ai-concat.mp4");
         const finalUrl = await uploadFileToCos(episodeVideoPath, cosKey);
 
-        // Update episode.videoUrl with the concatenated video
+        // Update episode.videoUrl
         await db
           .update(episodes)
           .set({ videoUrl: finalUrl })
           .where(eq(episodes.id, episode.id));
 
-        console.log(`Episode ${epNum}: concatenated video saved: ${finalUrl}`);
+        console.log(`Episode ${epNum}: final video saved: ${finalUrl}`);
       } catch (err) {
-        console.error(`Failed to concat videos for Episode ${epNum}:`, err);
+        console.error(`Failed to finalize episode ${epNum}:`, err);
       }
     }
 

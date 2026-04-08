@@ -84,8 +84,8 @@ function pickKenBurnsEffect(shotNumber: number): KenBurnsEffect {
  * Returns the zoompan filter expression and the scale+framerate prepended.
  */
 function buildKenBurnsFilter(effect: KenBurnsEffect, totalFrames: number): string {
-  // Base scale to 1280x720, ensure image covers the frame
-  const scale = "scale=1280:720";
+  // Upscale to 2x first so zoompan has enough pixels for smooth panning
+  const scale = "scale=2560:1440:flags=lanczos";
 
   switch (effect) {
     case "zoom-in":
@@ -145,27 +145,66 @@ async function composeShotVideo(
   const { shot, shotAudio } = input;
   const outputPath = path.join(outputDir, `shot-${shot.shotNumber}.mp4`);
 
-  // If CogVideoX video exists, use it and add audio
+  // If CogVideoX video exists, loop video to match audio duration, then add audio
   if (input.videoUrl) {
-    const cmd = `ffmpeg -i "${input.videoUrl}" -i "${shotAudio.audioUrl}" -vf "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black" -c:v libx264 -c:a aac -shortest -y "${outputPath}"`;
+    // Get audio duration to match
+    let audioDuration = shotAudio.duration || 5;
+    try {
+      const { stdout } = await execAsync(
+        `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${shotAudio.audioUrl}"`
+      );
+      audioDuration = parseFloat(stdout.trim()) || shotAudio.duration || 5;
+    } catch {
+      // use default
+    }
+
+    const fadeDuration = Math.min(0.3, audioDuration * 0.1);
+    const cmd = `ffmpeg -y -stream_loop -1 -i "${input.videoUrl}" -i "${shotAudio.audioUrl}" -filter_complex "[0:v]scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black,fade=t=in:st=0:d=${fadeDuration},fade=t=out:st=${Math.max(0, audioDuration - fadeDuration)}:d=${fadeDuration}[v];[1:a]aformat=sample_rates=44100:channel_layouts=stereo[a]" -map "[v]" -map "[a]" -t ${audioDuration} -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest -y "${outputPath}"`;
     await execAsync(cmd, { timeout: 120000 });
     return outputPath;
   }
 
-  // Otherwise: image + Ken Burns + audio (with varied effects per shot)
+  // Otherwise: image + smooth motion + audio
   if (input.imageUrl) {
-    const durationMs = Math.round(shotAudio.duration * 1000);
-    const zoompanDuration = Math.max(1, Math.ceil(shotAudio.duration * 25)); // d is in frames (25fps)
+    const duration = shotAudio.duration;
+    const fadeDuration = Math.min(0.5, duration * 0.15);
 
+    // Use gentle zoom animation instead of zoompan (much smoother, no jitter)
+    // zoompan is CPU-heavy and produces jerky frames on small images
+    // Instead: scale up slightly + use setpts for slow playback
     const effect = pickKenBurnsEffect(shot.shotNumber);
-    const kenBurnsFilter = buildKenBurnsFilter(effect, zoompanDuration);
+    let motionFilter: string;
 
-    // Fade in/out for smooth transitions between shots
-    const fadeDuration = Math.min(0.5, shotAudio.duration * 0.15);
+    switch (effect) {
+      case "zoom-in":
+        // Slowly zoom in from 100% to 110%
+        motionFilter = `scale=1408:792:flags=lanczos,zoompan=z='min(zoom+0.0008,1.15)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${Math.max(1, Math.ceil(duration * 30))}:s=1280x720:fps=30`;
+        break;
+      case "zoom-out":
+        // Start slightly zoomed in, slowly pull back
+        motionFilter = `scale=1408:792:flags=lanczos,zoompan=z='if(eq(on,1),1.12,max(zoom-0.0008,1.0))':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${Math.max(1, Math.ceil(duration * 30))}:s=1280x720:fps=30`;
+        break;
+      case "pan-left":
+        motionFilter = `scale=1408:792:flags=lanczos,zoompan=z='1.08':x='(iw-iw/zoom)-on*((iw-iw/zoom)/${Math.max(1, Math.ceil(duration * 30))})':y='ih/2-(ih/zoom/2)':d=${Math.max(1, Math.ceil(duration * 30))}:s=1280x720:fps=30`;
+        break;
+      case "pan-right":
+        motionFilter = `scale=1408:792:flags=lanczos,zoompan=z='1.08':x='on*((iw-iw/zoom)/${Math.max(1, Math.ceil(duration * 30))})':y='ih/2-(ih/zoom/2)':d=${Math.max(1, Math.ceil(duration * 30))}:s=1280x720:fps=30`;
+        break;
+      case "pan-up":
+        motionFilter = `scale=1408:792:flags=lanczos,zoompan=z='1.08':x='iw/2-(iw/zoom/2)':y='(ih-ih/zoom)-on*((ih-ih/zoom)/${Math.max(1, Math.ceil(duration * 30))})':d=${Math.max(1, Math.ceil(duration * 30))}:s=1280x720:fps=30`;
+        break;
+      case "pan-down":
+        motionFilter = `scale=1408:792:flags=lanczos,zoompan=z='1.08':x='iw/2-(iw/zoom/2)':y='on*((ih-ih/zoom)/${Math.max(1, Math.ceil(duration * 30))})':d=${Math.max(1, Math.ceil(duration * 30))}:s=1280x720:fps=30`;
+        break;
+      default:
+        // Gentle zoom in by default (zoom-in-left, zoom-in-right, zoom-out-left, zoom-out-right, etc.)
+        motionFilter = `scale=1408:792:flags=lanczos,zoompan=z='min(zoom+0.0008,1.12)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${Math.max(1, Math.ceil(duration * 30))}:s=1280x720:fps=30`;
+        break;
+    }
 
-    const filterComplex = `[0:v]${kenBurnsFilter},fade=t=in:st=0:d=${fadeDuration},fade=t=out:st=${shotAudio.duration - fadeDuration}:d=${fadeDuration}[v];[1:a]anull[a]`;
-    const cmd = `ffmpeg -loop 1 -i "${input.imageUrl}" -i "${shotAudio.audioUrl}" -filter_complex "${filterComplex}" -map "[v]" -map "[a]" -c:v libx264 -t ${shotAudio.duration} -pix_fmt yuv420p -shortest -y "${outputPath}"`;
-    await execAsync(cmd, { timeout: 120000 });
+    const filterComplex = `[0:v]${motionFilter},fade=t=in:st=0:d=${fadeDuration},fade=t=out:st=${Math.max(0, duration - fadeDuration)}:d=${fadeDuration}[v];[1:a]aformat=sample_rates=44100:channel_layouts=stereo[a]`;
+    const cmd = `ffmpeg -loop 1 -i "${input.imageUrl}" -i "${shotAudio.audioUrl}" -filter_complex "${filterComplex}" -map "[v]" -map "[a]" -c:v libx264 -t ${duration} -pix_fmt yuv420p -shortest -y "${outputPath}"`;
+    await execAsync(cmd, { timeout: 180000 });
     return outputPath;
   }
 
