@@ -5,7 +5,8 @@ import { dramas, episodes, generationTasks } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { composeVideo, composeEpisodeFromShots, mergeVideos } from "@/lib/ai/video-composer";
-import { generateSubtitles } from "@/lib/ai/subtitle-generator";
+import { generateSubtitles, generateSubtitlesWithASR } from "@/lib/ai/subtitle-generator";
+import { isAsrConfigured } from "@/lib/ai/asr-client";
 import { uploadFileToCos, videoCosKey } from "@/lib/ai/cos-storage";
 import { inferBgmPreset, BGM_VOLUME_MAP } from "@/lib/ai/bgm-library";
 import type { Shot, ShotAudio } from "@/types/drama";
@@ -36,7 +37,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { dramaId, episodeId } = body;
+    const { dramaId, episodeId, useAsr } = body;
 
     if (!dramaId) {
       return NextResponse.json({ error: "缺少 dramaId" }, { status: 400 });
@@ -118,12 +119,22 @@ export async function POST(request: NextRequest) {
         // Generate subtitle on the fly if not already done
         let subtitlePath = episode.subtitleUrl;
         if (!subtitlePath) {
-          subtitlePath = await generateSubtitles(
-            shots,
-            shotAudios,
-            dramaId,
-            episode.episodeNumber
-          );
+          if (useAsr && isAsrConfigured()) {
+            const asrResult = await generateSubtitlesWithASR(
+              shots,
+              shotAudios,
+              dramaId,
+              episode.episodeNumber
+            );
+            subtitlePath = asrResult.subtitlePath;
+          } else {
+            subtitlePath = await generateSubtitles(
+              shots,
+              shotAudios,
+              dramaId,
+              episode.episodeNumber
+            );
+          }
           await db
             .update(episodes)
             .set({ subtitleUrl: subtitlePath })
@@ -294,12 +305,22 @@ export async function POST(request: NextRequest) {
           // Generate subtitle if not done
           let subtitlePath = episode.subtitleUrl;
           if (!subtitlePath) {
-            subtitlePath = await generateSubtitles(
-              shots,
-              shotAudios,
-              dramaId,
-              episode.episodeNumber
-            );
+            if (useAsr && isAsrConfigured()) {
+              const asrResult = await generateSubtitlesWithASR(
+                shots,
+                shotAudios,
+                dramaId,
+                episode.episodeNumber
+              );
+              subtitlePath = asrResult.subtitlePath;
+            } else {
+              subtitlePath = await generateSubtitles(
+                shots,
+                shotAudios,
+                dramaId,
+                episode.episodeNumber
+              );
+            }
             await db
               .update(episodes)
               .set({ subtitleUrl: subtitlePath })

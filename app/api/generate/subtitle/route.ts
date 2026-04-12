@@ -4,7 +4,8 @@ import { db } from "@/lib/db";
 import { dramas, episodes, generationTasks } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
-import { generateSubtitles } from "@/lib/ai/subtitle-generator";
+import { generateSubtitles, generateSubtitlesWithASR } from "@/lib/ai/subtitle-generator";
+import { isAsrConfigured } from "@/lib/ai/asr-client";
 import type { Shot, ShotAudio } from "@/types/drama";
 
 export async function POST(request: NextRequest) {
@@ -15,7 +16,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { dramaId, episodeId } = body;
+    const { dramaId, episodeId, useAsr } = body; // useAsr: boolean, ASR精排模式
 
     if (!dramaId) {
       return NextResponse.json({ error: "缺少 dramaId" }, { status: 400 });
@@ -39,17 +40,40 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "没有找到剧集" }, { status: 404 });
     }
 
+    // Validate ASR mode
+    if (useAsr && !isAsrConfigured()) {
+      return NextResponse.json(
+        { error: "ASR 模式需要配置 GLM_API_KEY" },
+        { status: 400 }
+      );
+    }
+
     const taskId = uuidv4();
     await db.insert(generationTasks).values({
       id: taskId,
       dramaId,
       type: "subtitle",
       status: "processing",
-      inputData: { episodeCount: targetEpisodes.length },
+      inputData: { episodeCount: targetEpisodes.length, useAsr: !!useAsr },
       startedAt: new Date(),
     });
 
-    const results: { episodeNumber: number; subtitleUrl: string }[] = [];
+    const results: {
+      episodeNumber: number;
+      subtitleUrl: string;
+      qualityReport?: {
+        totalShots: number;
+        matched: number;
+        mismatched: number;
+        details: {
+          shotNumber: number;
+          originalText: string;
+          asrText: string;
+          match: boolean;
+          diff: string;
+        }[];
+      };
+    }[] = [];
 
     for (const episode of targetEpisodes) {
       if (!episode.shotData || !Array.isArray(episode.shotData)) {
@@ -60,7 +84,6 @@ export async function POST(request: NextRequest) {
       const shots = episode.shotData as Shot[];
 
       // Reconstruct ShotAudio from voiceover directory
-      // The voiceoverUrl for V2 is the directory path containing shot-*.mp3 files
       const shotAudios = await reconstructShotAudios(
         shots,
         episode.voiceoverUrl,
@@ -68,22 +91,44 @@ export async function POST(request: NextRequest) {
         episode.episodeNumber
       );
 
-      const subtitleUrl = await generateSubtitles(
-        shots,
-        shotAudios,
-        dramaId,
-        episode.episodeNumber
-      );
+      if (useAsr) {
+        // ASR 精排模式：生成字幕 + 配音质量检测
+        const asrResult = await generateSubtitlesWithASR(
+          shots,
+          shotAudios,
+          dramaId,
+          episode.episodeNumber
+        );
 
-      await db
-        .update(episodes)
-        .set({ subtitleUrl })
-        .where(eq(episodes.id, episode.id));
+        await db
+          .update(episodes)
+          .set({ subtitleUrl: asrResult.subtitlePath })
+          .where(eq(episodes.id, episode.id));
 
-      results.push({
-        episodeNumber: episode.episodeNumber,
-        subtitleUrl,
-      });
+        results.push({
+          episodeNumber: episode.episodeNumber,
+          subtitleUrl: asrResult.subtitlePath,
+          qualityReport: asrResult.qualityReport,
+        });
+      } else {
+        // 传统模式：基于文本+时长生成字幕
+        const subtitleUrl = await generateSubtitles(
+          shots,
+          shotAudios,
+          dramaId,
+          episode.episodeNumber
+        );
+
+        await db
+          .update(episodes)
+          .set({ subtitleUrl })
+          .where(eq(episodes.id, episode.id));
+
+        results.push({
+          episodeNumber: episode.episodeNumber,
+          subtitleUrl,
+        });
+      }
     }
 
     await db
@@ -91,7 +136,12 @@ export async function POST(request: NextRequest) {
       .set({ status: "completed", outputData: { results }, completedAt: new Date() })
       .where(eq(generationTasks.id, taskId));
 
-    return NextResponse.json({ taskId, results });
+    return NextResponse.json({
+      taskId,
+      results,
+      mode: useAsr ? "asr" : "standard",
+      asrAvailable: isAsrConfigured(),
+    });
   } catch (error) {
     console.error("Subtitle generation failed:", error);
     return NextResponse.json(

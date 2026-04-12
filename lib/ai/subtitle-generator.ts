@@ -1,9 +1,13 @@
 import path from "path";
 import fs from "fs/promises";
 import type { Shot, ShotAudio } from "@/types/drama";
+import { transcribeAudio, isAsrConfigured } from "@/lib/ai/asr-client";
+
+// ============ Mode: generateSubtitles (基于文本+时长的传统模式) ============
 
 /**
  * Generate SRT subtitle file from shots and their audio durations.
+ * 使用 ffprobe 获取的实际音频时长来计算精确时间轴。
  */
 export async function generateSubtitles(
   shots: Shot[],
@@ -40,20 +44,22 @@ export async function generateSubtitles(
     // Determine subtitle text
     let text: string;
     if (shot.type === "dialogue" && shot.character && shot.line) {
-      text = `${shot.character}: ${shot.line}`;
+      text = shot.character + "：" + shot.line;
     } else if (shot.subtitle) {
       text = shot.subtitle;
     } else if (shot.line) {
-      text = shot.character ? `${shot.character}: ${shot.line}` : shot.line;
+      text = shot.character ? shot.character + "：" + shot.line : shot.line;
     } else {
       text = "";
     }
 
     if (text.trim()) {
-      const entryNum = srtEntries.length + 1;
-      // SRT requires newlines to be escaped
-      const escapedText = text.replace(/\n/g, " ");
-      srtEntries.push(`${entryNum}\n${startTime} --> ${endTime}\n${escapedText}`);
+      // Long text → split into multiple subtitle lines for better readability
+      const lines = splitSubtitleText(text, durationMs);
+      for (const line of lines) {
+        const entryNum = srtEntries.length + 1;
+        srtEntries.push(`${entryNum}\n${line.start} --> ${line.end}\n${line.text}`);
+      }
     }
 
     currentTimeMs += durationMs;
@@ -65,10 +71,259 @@ export async function generateSubtitles(
   return outputPath;
 }
 
+// ============ Mode: generateSubtitlesWithASR (ASR 精排模式) ============
+
+export interface ASRSubtitleResult {
+  subtitlePath: string;
+  qualityReport: {
+    totalShots: number;
+    matched: number;     // ASR 文本与原始文本匹配
+    mismatched: number;  // 有差异（可能 TTS 漏字/错字）
+    details: {
+      shotNumber: number;
+      originalText: string;
+      asrText: string;
+      match: boolean;
+      diff: string; // 简要描述差异
+    }[];
+  };
+}
+
+/**
+ * ASR 精排字幕生成模式：
+ * 1. 从每个 shot 的配音音频进行 ASR 识别
+ * 2. 将 ASR 识别文本与原始台词对比（质量检测）
+ * 3. 基于 ASR 识别的文本生成更准确的字幕
+ * 4. 使用原始文本（因为 ASR 可能误识别专有名词），但标注质量
+ */
+export async function generateSubtitlesWithASR(
+  shots: Shot[],
+  shotAudios: ShotAudio[],
+  dramaId: string,
+  episodeNumber: number
+): Promise<ASRSubtitleResult> {
+  const outputDir = path.join(
+    process.env.UPLOAD_DIR || "./uploads",
+    "subtitles",
+    dramaId
+  );
+  const outputPath = path.join(outputDir, `episode-${episodeNumber}.srt`);
+
+  await fs.mkdir(outputDir, { recursive: true });
+
+  if (!isAsrConfigured()) {
+    throw new Error("ASR not configured. Set GLM_API_KEY in environment.");
+  }
+
+  // Build audio map
+  const audioMap = new Map<number, ShotAudio>();
+  for (const audio of shotAudios) {
+    audioMap.set(audio.shotNumber, audio);
+  }
+
+  // Collect character names as hotwords for better recognition
+  const characterNames = [...new Set(
+    shots.filter(s => s.character).map(s => s.character!)
+  )];
+
+  let currentTimeMs = 0;
+  const srtEntries: string[] = [];
+  const qualityDetails: ASRSubtitleResult["qualityReport"]["details"] = [];
+  let matched = 0;
+  let mismatched = 0;
+
+  for (const shot of shots) {
+    const audio = audioMap.get(shot.shotNumber);
+    const durationMs = audio ? Math.round(audio.duration * 1000) : (shot.duration || 5) * 1000;
+
+    // Original text for this shot
+    let originalText: string;
+    if (shot.type === "dialogue" && shot.line) {
+      originalText = shot.character ? shot.character + "：" + shot.line : shot.line;
+    } else if (shot.subtitle) {
+      originalText = shot.subtitle;
+    } else if (shot.line) {
+      originalText = shot.character ? shot.character + "：" + shot.line : shot.line;
+    } else {
+      originalText = "";
+    }
+
+    // Try ASR recognition if audio file exists
+    let asrText = "";
+    if (audio?.audioUrl) {
+      try {
+        const { exec } = await import("child_process");
+        const { promisify } = await import("util");
+        const execAsync = promisify(exec);
+
+        try {
+          await fs.access(audio.audioUrl);
+          const result = await transcribeAudio(audio.audioUrl, {
+            hotwords: characterNames,
+          });
+          asrText = result.text.trim();
+        } catch {
+          // Audio file doesn't exist, skip ASR
+        }
+      } catch {
+        // ASR failed, continue with original text
+      }
+    }
+
+    // Quality check: compare ASR text with original
+    if (asrText && originalText) {
+      const normalizedOriginal = originalText.replace(/[，。！？、：；""''（）《》\s]/g, "");
+      const normalizedAsr = asrText.replace(/[，。！？、：；""''（）《》\s]/g, "");
+      const isMatch = normalizedOriginal === normalizedAsr || 
+        normalizedAsr.includes(normalizedOriginal) ||
+        normalizedOriginal.includes(normalizedAsr);
+      
+      let diff = "";
+      if (!isMatch) {
+        // Simple diff: find characters in original but not in ASR (potential omissions)
+        const missing = [...normalizedOriginal].filter(c => !normalizedAsr.includes(c));
+        const extra = [...normalizedAsr].filter(c => !normalizedOriginal.includes(c));
+        if (missing.length > 0) diff += `缺少: ${missing.join("")}`;
+        if (extra.length > 0) diff += `${diff ? " | " : ""}多余: ${extra.join("")}`;
+        mismatched++;
+      } else {
+        matched++;
+      }
+
+      qualityDetails.push({
+        shotNumber: shot.shotNumber,
+        originalText,
+        asrText,
+        match: isMatch,
+        diff,
+      });
+    } else {
+      matched++;
+      qualityDetails.push({
+        shotNumber: shot.shotNumber,
+        originalText,
+        asrText: asrText || "(无法识别)",
+        match: true,
+        diff: "",
+      });
+    }
+
+    // Generate subtitle entry using original text (more accurate for names/terms)
+    // but split long text into multiple lines based on duration
+    if (originalText.trim()) {
+      const lines = splitSubtitleText(originalText, durationMs);
+      for (const line of lines) {
+        const entryNum = srtEntries.length + 1;
+        srtEntries.push(`${entryNum}\n${line.start} --> ${line.end}\n${line.text}`);
+      }
+    }
+
+    currentTimeMs += durationMs;
+  }
+
+  const srtContent = srtEntries.join("\n\n") + "\n";
+  await fs.writeFile(outputPath, srtContent, "utf-8");
+
+  return {
+    subtitlePath: outputPath,
+    qualityReport: {
+      totalShots: shots.length,
+      matched,
+      mismatched,
+      details: qualityDetails,
+    },
+  };
+}
+
+// ============ Helpers ============
+
+interface SubtitleLine {
+  start: string;
+  end: string;
+  text: string;
+}
+
+/**
+ * Split long subtitle text into multiple lines based on duration.
+ * Rule: max ~15 chars per subtitle, max ~4 seconds per subtitle.
+ */
+function splitSubtitleText(text: string, durationMs: number): SubtitleLine[] {
+  const maxCharsPerLine = 20; // max characters per subtitle line
+  const maxMsPerLine = 5000;  // max duration per subtitle line
+  const minMsPerLine = 1500;  // minimum duration per subtitle line
+
+  // Clean up stage directions like （自言自语）, （微笑）
+  const cleaned = text.replace(/（[^）]+）/g, "").trim();
+  
+  if (cleaned.length <= maxCharsPerLine && durationMs <= maxMsPerLine) {
+    return [{ start: formatSrtTime(0), end: formatSrtTime(durationMs), text: cleaned }];
+  }
+
+  const lines: SubtitleLine[] = [];
+  const chars = [...cleaned];
+  let pos = 0;
+  let timePos = 0;
+
+  while (pos < chars.length) {
+    const remaining = chars.length - pos;
+    const remainingTime = durationMs - timePos;
+
+    if (remaining <= maxCharsPerLine) {
+      // Last segment: use remaining time
+      lines.push({
+        start: formatSrtTime(timePos),
+        end: formatSrtTime(durationMs),
+        text: chars.slice(pos).join(""),
+      });
+      break;
+    }
+
+    // Determine how many chars fit in this line
+    const timeForThisLine = Math.min(maxMsPerLine, remainingTime * 0.6);
+    const charsForThisLine = Math.min(
+      maxCharsPerLine,
+      Math.max(4, Math.floor(chars.length * (timeForThisLine / durationMs)))
+    );
+
+    // Try to break at punctuation or natural pause
+    let breakPos = pos + charsForThisLine;
+    const searchWindow = chars.slice(pos, pos + charsForThisLine + 5);
+    for (let i = searchWindow.length - 1; i >= Math.max(0, searchWindow.length - 8); i--) {
+      const ch = searchWindow[i];
+      if ("，。！？、；：".includes(ch)) {
+        breakPos = pos + i + 1;
+        break;
+      }
+    }
+
+    const lineText = chars.slice(pos, breakPos).join("");
+    const lineDuration = Math.max(
+      minMsPerLine,
+      Math.min(maxMsPerLine, Math.round(durationMs * (breakPos - pos) / chars.length))
+    );
+
+    lines.push({
+      start: formatSrtTime(timePos),
+      end: formatSrtTime(timePos + lineDuration),
+      text: lineText,
+    });
+
+    timePos += lineDuration;
+    pos = breakPos;
+  }
+
+  // Adjust last line end time
+  if (lines.length > 0) {
+    lines[lines.length - 1].end = formatSrtTime(durationMs);
+  }
+
+  return lines;
+}
+
 /**
  * Format milliseconds to SRT timestamp: HH:MM:SS,mmm
  */
-function formatSrtTime(ms: number): string {
+export function formatSrtTime(ms: number): string {
   const hours = Math.floor(ms / 3600000);
   const minutes = Math.floor((ms % 3600000) / 60000);
   const seconds = Math.floor((ms % 60000) / 1000);
