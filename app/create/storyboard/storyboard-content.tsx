@@ -4,9 +4,10 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { StepIndicator } from "@/components/create/step-indicator";
-import { StoryboardPanel } from "@/components/drama/storyboard-panel";
-import { Loader2, ArrowRight, ArrowLeft, Image } from "lucide-react";
+import { ShotCard } from "@/components/drama/shot-card";
+import { Loader2, ArrowRight, ArrowLeft, Image, ChevronDown, ChevronUp, Film } from "lucide-react";
 import Link from "next/link";
+import { toast } from "sonner";
 
 const steps = [
   { number: 1, title: "创意" },
@@ -21,6 +22,16 @@ interface StoryboardItem {
   title: string;
   imageUrl: string | null;
   narration: string;
+  shotData?: Array<{
+    shotNumber: number;
+    visual: string;
+    duration: number;
+    type?: "dialogue" | "narration";
+    character?: string;
+    line?: string;
+    subtitle?: string;
+    aiVideoUrl?: string | null;
+  }>;
 }
 
 export default function StoryboardPageContent() {
@@ -32,6 +43,7 @@ export default function StoryboardPageContent() {
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [generatingIndex, setGeneratingIndex] = useState(-1);
+  const [expandedEpisode, setExpandedEpisode] = useState<number | null>(null);
   const [error, setError] = useState("");
   const progressRef = useRef<HTMLDivElement>(null);
 
@@ -44,7 +56,7 @@ export default function StoryboardPageContent() {
       if (res.ok) {
         const data = await res.json();
         setItems(
-          data.episodes.map((ep: { id: string; episodeNumber: number; title: string; imageUrl: string | null; narrationText: string }) => ({
+          data.episodes.map((ep: any) => ({
             id: ep.id,
             episodeNumber: ep.episodeNumber,
             title: ep.title || `第${ep.episodeNumber}集`,
@@ -56,6 +68,7 @@ export default function StoryboardPageContent() {
                 : `/api/uploads/${ep.imageUrl.replace(/^\.?\/?uploads\/?/, "")}`
               : null,
             narration: ep.narrationText || "",
+            shotData: Array.isArray(ep.shotData) ? ep.shotData : undefined,
           }))
         );
       }
@@ -79,42 +92,43 @@ export default function StoryboardPageContent() {
     setGenerating(true);
     setError("");
 
-    // Generate episode by episode to show progress
-    const episodesToGenerate = items.filter((i) => !i.imageUrl);
     const allEpisodes = items.length > 0 ? items : await (async () => {
-      // If items is empty, fetch them first
       const res = await fetch(`/api/dramas/${dramaId}`);
       if (res.ok) {
         const data = await res.json();
-        return data.episodes.map((ep: { id: string; episodeNumber: number; title: string; imageUrl: string | null; narrationText: string }) => ({
+        return data.episodes.map((ep: any) => ({
           id: ep.id,
           episodeNumber: ep.episodeNumber,
           title: ep.title || `第${ep.episodeNumber}集`,
           imageUrl: ep.imageUrl,
           narration: ep.narrationText || "",
+          shotData: Array.isArray(ep.shotData) ? ep.shotData : undefined,
         }));
       }
       return [];
     })();
 
+    const episodesToGenerate = allEpisodes.filter((ep: StoryboardItem) => !ep.imageUrl);
+
     if (episodesToGenerate.length === 0 && allEpisodes.length > 0) {
-      // Regenerate all
       try {
         const res = await fetch("/api/generate/storyboard", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ dramaId }),
         });
-
         const data = await res.json();
         if (!res.ok) {
           setError(data.error || "生成失败");
+          toast.error(data.error || "生成失败");
           setGenerating(false);
           return;
         }
+        toast.success("分镜重新生成完成");
         await fetchEpisodes();
       } catch {
         setError("分镜生成失败");
+        toast.error("分镜生成失败");
       } finally {
         setGenerating(false);
         setGeneratingIndex(-1);
@@ -122,10 +136,8 @@ export default function StoryboardPageContent() {
       return;
     }
 
-    // Generate one by one for progress tracking
     for (let i = 0; i < allEpisodes.length; i++) {
       if (episodesToGenerate.length > 0 && allEpisodes[i].imageUrl) continue;
-
       setGeneratingIndex(i);
       try {
         const res = await fetch("/api/generate/storyboard", {
@@ -134,16 +146,20 @@ export default function StoryboardPageContent() {
           body: JSON.stringify({ dramaId, episodeId: allEpisodes[i].id }),
         });
         if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
           setError(`第 ${allEpisodes[i].episodeNumber} 集分镜生成失败`);
+          toast.error(errData.error || `第 ${allEpisodes[i].episodeNumber} 集生成失败`);
           break;
         }
       } catch {
         setError(`第 ${allEpisodes[i].episodeNumber} 集分镜生成失败`);
+        toast.error(`第 ${allEpisodes[i].episodeNumber} 集生成失败`);
         break;
       }
     }
 
     await fetchEpisodes();
+    toast.success("分镜生成完成");
     setGenerating(false);
     setGeneratingIndex(-1);
   };
@@ -161,10 +177,11 @@ export default function StoryboardPageContent() {
       });
 
       if (res.ok) {
+        toast.success(`第 ${episodeNumber} 集分镜已重新生成`);
         await fetchEpisodes();
       }
     } catch {
-      // ignore
+      toast.error("重新生成失败");
     }
   };
 
@@ -177,6 +194,11 @@ export default function StoryboardPageContent() {
   }
 
   const totalCount = items.length || 3;
+  const totalShots = items.reduce((sum, ep) => sum + (ep.shotData?.length || 0), 0);
+  const shotsWithVideo = items.reduce(
+    (sum, ep) => sum + (ep.shotData?.filter((s) => s.aiVideoUrl).length || 0),
+    0
+  );
 
   return (
     <div className="min-h-screen bg-background">
@@ -190,14 +212,20 @@ export default function StoryboardPageContent() {
         {/* Step hint */}
         <div className="mb-6 sm:mb-8 p-3 sm:p-4 rounded-lg bg-emerald-500/5 border border-emerald-500/20">
           <p className="text-xs sm:text-sm text-emerald-400">
-            🎨 点击生成分镜图片，为每个镜头创建画面
+            🎨 AI 为每个镜头生成 1080p 画面，点击展开查看镜头详情
+            {totalShots > 0 && (
+              <span className="ml-2 text-emerald-400/70">
+                共 {items.length} 集 / {totalShots} 个镜头
+                {shotsWithVideo > 0 && ` / ${shotsWithVideo} 个 AI 视频`}
+              </span>
+            )}
           </p>
         </div>
 
         <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 sm:mb-8 gap-3">
           <div>
             <h1 className="text-xl sm:text-2xl font-bold mb-1">AI 分镜 🎨</h1>
-            <p className="text-xs sm:text-sm text-muted-foreground">AI 为每集生成的画面</p>
+            <p className="text-xs sm:text-sm text-muted-foreground">每个镜头独立生成画面，支持 1080p 高清</p>
           </div>
           <Button
             onClick={handleGenerateAll}
@@ -221,7 +249,7 @@ export default function StoryboardPageContent() {
           <div className="mb-6 text-sm text-red-400 bg-red-500/10 rounded p-3">{error}</div>
         )}
 
-        {/* Progress bar during generation */}
+        {/* Progress bar */}
         {generating && (
           <div className="mb-6 p-3 sm:p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-lg">
             <div className="flex items-center gap-3 mb-3">
@@ -233,12 +261,9 @@ export default function StoryboardPageContent() {
                 <p className="text-sm font-medium text-emerald-400">
                   正在生成第 {generatingIndex >= 0 ? generatingIndex + 1 : "?"} / {totalCount} 集分镜
                 </p>
-                <p className="text-xs text-muted-foreground">
-                  每张图片需要 10-20 秒
-                </p>
+                <p className="text-xs text-muted-foreground">每张图片需要 10-20 秒</p>
               </div>
             </div>
-            {/* Progress bar */}
             <div className="w-full bg-emerald-500/20 rounded-full h-1.5 overflow-hidden">
               <div
                 ref={progressRef}
@@ -251,11 +276,103 @@ export default function StoryboardPageContent() {
           </div>
         )}
 
-        <StoryboardPanel
-          items={items}
-          onRegenerate={handleRegenerate}
-          loading={generating}
-        />
+        {/* Episode accordion with shot cards */}
+        <div className="space-y-4">
+          {items.map((item) => {
+            const isExpanded = expandedEpisode === item.episodeNumber;
+            const shots = item.shotData || [];
+            const isThisGenerating = generating && generatingIndex >= 0 && (items[generatingIndex] as StoryboardItem | undefined)?.episodeNumber === item.episodeNumber;
+
+            return (
+              <div
+                key={item.episodeNumber}
+                className="border border-border/50 rounded-lg overflow-hidden bg-card/30"
+              >
+                {/* Episode header */}
+                <div
+                  className="flex items-center gap-3 p-3 sm:p-4 cursor-pointer hover:bg-card/50 transition"
+                  onClick={() => setExpandedEpisode(isExpanded ? null : item.episodeNumber)}
+                >
+                  {/* Thumbnail */}
+                  <div className="w-16 h-10 sm:w-20 sm:h-12 rounded overflow-hidden bg-muted shrink-0 relative">
+                    {item.imageUrl ? (
+                      <img src={item.imageUrl} alt={item.title} className="w-full h-full object-cover" />
+                    ) : isThisGenerating ? (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <Loader2 className="h-4 w-4 animate-spin text-emerald-400" />
+                      </div>
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <span className="text-[10px] text-muted-foreground/50">EP{item.episodeNumber}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Info */}
+                  <div className="flex-1 min-w-0">
+                    <h3 className="font-medium text-sm sm:text-base truncate">
+                      第 {item.episodeNumber} 集 - {item.title}
+                    </h3>
+                    <p className="text-xs text-muted-foreground">
+                      {shots.length > 0
+                        ? `${shots.length} 个镜头`
+                        : item.narration
+                          ? `${item.narration.slice(0, 50)}${item.narration.length > 50 ? "..." : ""}`
+                          : "暂无内容"}
+                    </p>
+                  </div>
+
+                  {/* Status badges */}
+                  <div className="flex items-center gap-2 shrink-0">
+                    {item.imageUrl && shots.length > 0 && (
+                      <span className="text-[10px] text-emerald-400 hidden sm:inline">✓ 分镜完成</span>
+                    )}
+                    {shots.filter((s) => s.aiVideoUrl).length > 0 && (
+                      <span className="text-[10px] text-emerald-400 hidden sm:inline flex items-center gap-0.5">
+                        <Film className="h-3 w-3" />
+                        {shots.filter((s) => s.aiVideoUrl).length} 视频
+                      </span>
+                    )}
+                    {isExpanded ? (
+                      <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                    ) : (
+                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                    )}
+                  </div>
+                </div>
+
+                {/* Expanded shot cards */}
+                {isExpanded && shots.length > 0 && (
+                  <div className="border-t border-border/50 p-3 sm:p-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {shots.map((shot) => (
+                        <ShotCard
+                          key={shot.shotNumber}
+                          shotNumber={shot.shotNumber}
+                          visual={shot.visual}
+                          duration={shot.duration}
+                          type={shot.type}
+                          character={shot.character}
+                          line={shot.line}
+                          subtitle={shot.subtitle}
+                          aiVideoUrl={shot.aiVideoUrl}
+                          onRegenerateImage={() => handleRegenerate(item.episodeNumber)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Expanded simple view for non-shot episodes */}
+                {isExpanded && shots.length === 0 && item.narration && (
+                  <div className="border-t border-border/50 p-3 sm:p-4">
+                    <p className="text-sm text-muted-foreground">{item.narration}</p>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
 
         <div className="flex flex-col sm:flex-row justify-between gap-3 mt-8">
           <Link href={`/create/script?dramaId=${dramaId}`}>
