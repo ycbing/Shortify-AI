@@ -15,7 +15,7 @@ interface CogViewResponse {
 export async function generateImage(
   prompt: string,
   style: string = "realistic",
-  size: "1024x1024" | "1280x720" | "1920x1080" = "1280x720"
+  size: "1024x1024" | "1280x720" | "1920x1080" = "1920x1080"
 ): Promise<string> {
   const stylePrompt = getStyleImagePrompt(style as "realistic" | "anime" | "ink" | "cyberpunk");
   const fullPrompt = `${prompt}。画面风格：${stylePrompt}。宽屏16:9构图，电影感画面，专业摄影级别。`;

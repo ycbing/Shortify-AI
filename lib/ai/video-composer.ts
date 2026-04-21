@@ -11,7 +11,7 @@ export interface ComposeOptions {
   audioPath: string;
   outputPath: string;
   subtitlePath?: string;
-  resolution?: "1280x720" | "1920x1080";
+  resolution?: "1280x720" | "1920x1080" | "3840x2160";
   fadeDuration?: number; // seconds
 }
 
@@ -23,7 +23,7 @@ export async function composeVideo(options: ComposeOptions): Promise<string> {
     audioPath,
     outputPath,
     subtitlePath,
-    resolution = "1280x720",
+    resolution = "1920x1080",
     fadeDuration = 0.5,
   } = options;
 
@@ -83,53 +83,56 @@ function pickKenBurnsEffect(shotNumber: number): KenBurnsEffect {
  * Build zoompan filter string for a given Ken Burns effect.
  * Returns the zoompan filter expression and the scale+framerate prepended.
  */
-function buildKenBurnsFilter(effect: KenBurnsEffect, totalFrames: number): string {
-  // Upscale to 2x first so zoompan has enough pixels for smooth panning
-  const scale = "scale=2560:1440:flags=lanczos";
+function buildKenBurnsFilter(effect: KenBurnsEffect, totalFrames: number, resolution = "1920x1080"): string {
+  // Parse resolution
+  const [w, h] = resolution.split("x").map(Number);
+  const upscaleW = Math.round(w * 1.4);
+  const upscaleH = Math.round(h * 1.4);
+  const scale = `scale=${upscaleW}:${upscaleH}:flags=lanczos`;
 
   switch (effect) {
     case "zoom-in":
       // Slow zoom in from center
-      return `${scale},zoompan=z='min(zoom+0.002,1.5)':d=${totalFrames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1280x720`;
+      return `${scale},zoompan=z='min(zoom+0.002,1.5)':d=${totalFrames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=${w}x${h}`;
 
     case "zoom-out":
       // Start zoomed in, slowly pull back
-      return `${scale},zoompan=z='if(eq(on,1),1.4,max(zoom-0.002,1.0))':d=${totalFrames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1280x720`;
+      return `${scale},zoompan=z='if(eq(on,1),1.4,max(zoom-0.002,1.0))':d=${totalFrames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=${w}x${h}`;
 
     case "pan-left":
       // Pan from right to left while slightly zooming
-      return `${scale},zoompan=z='min(zoom+0.001,1.3)':d=${totalFrames}:x='iw-iw/zoom-(on*(iw-iw/zoom)/${totalFrames})':y='ih/2-(ih/zoom/2)':s=1280x720`;
+      return `${scale},zoompan=z='min(zoom+0.001,1.3)':d=${totalFrames}:x='iw-iw/zoom-(on*(iw-iw/zoom)/${totalFrames})':y='ih/2-(ih/zoom/2)':s=${w}x${h}`;
 
     case "pan-right":
       // Pan from left to right while slightly zooming
-      return `${scale},zoompan=z='min(zoom+0.001,1.3)':d=${totalFrames}:x='(on*(iw-iw/zoom)/${totalFrames})':y='ih/2-(ih/zoom/2)':s=1280x720`;
+      return `${scale},zoompan=z='min(zoom+0.001,1.3)':d=${totalFrames}:x='(on*(iw-iw/zoom)/${totalFrames})':y='ih/2-(ih/zoom/2)':s=${w}x${h}`;
 
     case "pan-up":
       // Pan from bottom to top
-      return `${scale},zoompan=z='min(zoom+0.001,1.3)':d=${totalFrames}:x='iw/2-(iw/zoom/2)':y='ih-ih/zoom-(on*(ih-ih/zoom)/${totalFrames})':s=1280x720`;
+      return `${scale},zoompan=z='min(zoom+0.001,1.3)':d=${totalFrames}:x='iw/2-(iw/zoom/2)':y='ih-ih/zoom-(on*(ih-ih/zoom)/${totalFrames})':s=${w}x${h}`;
 
     case "pan-down":
       // Pan from top to bottom
-      return `${scale},zoompan=z='min(zoom+0.001,1.3)':d=${totalFrames}:x='iw/2-(iw/zoom/2)':y='(on*(ih-ih/zoom)/${totalFrames})':s=1280x720`;
+      return `${scale},zoompan=z='min(zoom+0.001,1.3)':d=${totalFrames}:x='iw/2-(iw/zoom/2)':y='(on*(ih-ih/zoom)/${totalFrames})':s=${w}x${h}`;
 
     case "zoom-in-left":
       // Zoom in focusing on left third
-      return `${scale},zoompan=z='min(zoom+0.002,1.4)':d=${totalFrames}:x='iw/3-(iw/zoom/3)':y='ih/2-(ih/zoom/2)':s=1280x720`;
+      return `${scale},zoompan=z='min(zoom+0.002,1.4)':d=${totalFrames}:x='iw/3-(iw/zoom/3)':y='ih/2-(ih/zoom/2)':s=${w}x${h}`;
 
     case "zoom-in-right":
       // Zoom in focusing on right third
-      return `${scale},zoompan=z='min(zoom+0.002,1.4)':d=${totalFrames}:x='2*iw/3-(iw/zoom/3)':y='ih/2-(ih/zoom/2)':s=1280x720`;
+      return `${scale},zoompan=z='min(zoom+0.002,1.4)':d=${totalFrames}:x='2*iw/3-(iw/zoom/3)':y='ih/2-(ih/zoom/2)':s=${w}x${h}`;
 
     case "zoom-out-left":
       // Start zoomed on left, pull back to center
-      return `${scale},zoompan=z='if(eq(on,1),1.4,max(zoom-0.002,1.0))':d=${totalFrames}:x='iw/3-(iw/zoom/3)':y='ih/2-(ih/zoom/2)':s=1280x720`;
+      return `${scale},zoompan=z='if(eq(on,1),1.4,max(zoom-0.002,1.0))':d=${totalFrames}:x='iw/3-(iw/zoom/3)':y='ih/2-(ih/zoom/2)':s=${w}x${h}`;
 
     case "zoom-out-right":
       // Start zoomed on right, pull back to center
-      return `${scale},zoompan=z='if(eq(on,1),1.4,max(zoom-0.002,1.0))':d=${totalFrames}:x='2*iw/3-(iw/zoom/3)':y='ih/2-(ih/zoom/2)':s=1280x720`;
+      return `${scale},zoompan=z='if(eq(on,1),1.4,max(zoom-0.002,1.0))':d=${totalFrames}:x='2*iw/3-(iw/zoom/3)':y='ih/2-(ih/zoom/2)':s=${w}x${h}`;
 
     default:
-      return `${scale},zoompan=z='min(zoom+0.002,1.5)':d=${totalFrames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1280x720`;
+      return `${scale},zoompan=z='min(zoom+0.002,1.5)':d=${totalFrames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=${w}x${h}`;
   }
 }
 
@@ -159,7 +162,7 @@ async function composeShotVideo(
     }
 
     const fadeDuration = Math.min(0.3, audioDuration * 0.1);
-    const cmd = `ffmpeg -y -stream_loop -1 -i "${input.videoUrl}" -i "${shotAudio.audioUrl}" -filter_complex "[0:v]scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black,fade=t=in:st=0:d=${fadeDuration},fade=t=out:st=${Math.max(0, audioDuration - fadeDuration)}:d=${fadeDuration}[v];[1:a]aformat=sample_rates=44100:channel_layouts=stereo[a]" -map "[v]" -map "[a]" -t ${audioDuration} -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest -y "${outputPath}"`;
+    const cmd = `ffmpeg -y -stream_loop -1 -i "${input.videoUrl}" -i "${shotAudio.audioUrl}" -filter_complex "[0:v]scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black,fade=t=in:st=0:d=${fadeDuration},fade=t=out:st=${Math.max(0, audioDuration - fadeDuration)}:d=${fadeDuration}[v];[1:a]aformat=sample_rates=44100:channel_layouts=stereo[a]" -map "[v]" -map "[a]" -t ${audioDuration} -c:v libx264 -crf 18 -preset fast -pix_fmt yuv420p -c:a aac -b:a 128k -shortest -y "${outputPath}"`;
     await execAsync(cmd, { timeout: 120000 });
     return outputPath;
   }
@@ -174,42 +177,43 @@ async function composeShotVideo(
     // Instead: scale up slightly + use setpts for slow playback
     const effect = pickKenBurnsEffect(shot.shotNumber);
     let motionFilter: string;
+    const targetRes = "1920x1080";
+    const [tw, th] = targetRes.split("x").map(Number);
+    const upscaleW = Math.round(tw * 1.1);
+    const upscaleH = Math.round(th * 1.1);
 
     switch (effect) {
       case "zoom-in":
-        // Slowly zoom in from 100% to 110%
-        motionFilter = `scale=1408:792:flags=lanczos,zoompan=z='min(zoom+0.0008,1.15)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${Math.max(1, Math.ceil(duration * 30))}:s=1280x720:fps=30`;
+        motionFilter = `scale=${upscaleW}:${upscaleH}:flags=lanczos,zoompan=z='min(zoom+0.0008,1.15)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${Math.max(1, Math.ceil(duration * 30))}:s=${tw}x${th}:fps=30`;
         break;
       case "zoom-out":
-        // Start slightly zoomed in, slowly pull back
-        motionFilter = `scale=1408:792:flags=lanczos,zoompan=z='if(eq(on,1),1.12,max(zoom-0.0008,1.0))':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${Math.max(1, Math.ceil(duration * 30))}:s=1280x720:fps=30`;
+        motionFilter = `scale=${upscaleW}:${upscaleH}:flags=lanczos,zoompan=z='if(eq(on,1),1.12,max(zoom-0.0008,1.0))':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${Math.max(1, Math.ceil(duration * 30))}:s=${tw}x${th}:fps=30`;
         break;
       case "pan-left":
-        motionFilter = `scale=1408:792:flags=lanczos,zoompan=z='1.08':x='(iw-iw/zoom)-on*((iw-iw/zoom)/${Math.max(1, Math.ceil(duration * 30))})':y='ih/2-(ih/zoom/2)':d=${Math.max(1, Math.ceil(duration * 30))}:s=1280x720:fps=30`;
+        motionFilter = `scale=${upscaleW}:${upscaleH}:flags=lanczos,zoompan=z='1.08':x='(iw-iw/zoom)-on*((iw-iw/zoom)/${Math.max(1, Math.ceil(duration * 30))})':y='ih/2-(ih/zoom/2)':d=${Math.max(1, Math.ceil(duration * 30))}:s=${tw}x${th}:fps=30`;
         break;
       case "pan-right":
-        motionFilter = `scale=1408:792:flags=lanczos,zoompan=z='1.08':x='on*((iw-iw/zoom)/${Math.max(1, Math.ceil(duration * 30))})':y='ih/2-(ih/zoom/2)':d=${Math.max(1, Math.ceil(duration * 30))}:s=1280x720:fps=30`;
+        motionFilter = `scale=${upscaleW}:${upscaleH}:flags=lanczos,zoompan=z='1.08':x='on*((iw-iw/zoom)/${Math.max(1, Math.ceil(duration * 30))})':y='ih/2-(ih/zoom/2)':d=${Math.max(1, Math.ceil(duration * 30))}:s=${tw}x${th}:fps=30`;
         break;
       case "pan-up":
-        motionFilter = `scale=1408:792:flags=lanczos,zoompan=z='1.08':x='iw/2-(iw/zoom/2)':y='(ih-ih/zoom)-on*((ih-ih/zoom)/${Math.max(1, Math.ceil(duration * 30))})':d=${Math.max(1, Math.ceil(duration * 30))}:s=1280x720:fps=30`;
+        motionFilter = `scale=${upscaleW}:${upscaleH}:flags=lanczos,zoompan=z='1.08':x='iw/2-(iw/zoom/2)':y='(ih-ih/zoom)-on*((ih-ih/zoom)/${Math.max(1, Math.ceil(duration * 30))})':d=${Math.max(1, Math.ceil(duration * 30))}:s=${tw}x${th}:fps=30`;
         break;
       case "pan-down":
-        motionFilter = `scale=1408:792:flags=lanczos,zoompan=z='1.08':x='iw/2-(iw/zoom/2)':y='on*((ih-ih/zoom)/${Math.max(1, Math.ceil(duration * 30))})':d=${Math.max(1, Math.ceil(duration * 30))}:s=1280x720:fps=30`;
+        motionFilter = `scale=${upscaleW}:${upscaleH}:flags=lanczos,zoompan=z='1.08':x='iw/2-(iw/zoom/2)':y='on*((ih-ih/zoom)/${Math.max(1, Math.ceil(duration * 30))})':d=${Math.max(1, Math.ceil(duration * 30))}:s=${tw}x${th}:fps=30`;
         break;
       default:
-        // Gentle zoom in by default (zoom-in-left, zoom-in-right, zoom-out-left, zoom-out-right, etc.)
-        motionFilter = `scale=1408:792:flags=lanczos,zoompan=z='min(zoom+0.0008,1.12)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${Math.max(1, Math.ceil(duration * 30))}:s=1280x720:fps=30`;
+        motionFilter = `scale=${upscaleW}:${upscaleH}:flags=lanczos,zoompan=z='min(zoom+0.0008,1.12)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${Math.max(1, Math.ceil(duration * 30))}:s=${tw}x${th}:fps=30`;
         break;
     }
 
     const filterComplex = `[0:v]${motionFilter},fade=t=in:st=0:d=${fadeDuration},fade=t=out:st=${Math.max(0, duration - fadeDuration)}:d=${fadeDuration}[v];[1:a]aformat=sample_rates=44100:channel_layouts=stereo[a]`;
-    const cmd = `ffmpeg -loop 1 -i "${input.imageUrl}" -i "${shotAudio.audioUrl}" -filter_complex "${filterComplex}" -map "[v]" -map "[a]" -c:v libx264 -t ${duration} -pix_fmt yuv420p -shortest -y "${outputPath}"`;
+    const cmd = `ffmpeg -loop 1 -i "${input.imageUrl}" -i "${shotAudio.audioUrl}" -filter_complex "${filterComplex}" -map "[v]" -map "[a]" -c:v libx264 -crf 18 -preset medium -t ${duration} -pix_fmt yuv420p -shortest -y "${outputPath}"`;
     await execAsync(cmd, { timeout: 180000 });
     return outputPath;
   }
 
   // No image or video — just audio as video (black frame)
-  const cmd = `ffmpeg -f lavfi -i color=c=black:s=1280x720:d=${shotAudio.duration} -i "${shotAudio.audioUrl}" -c:v libx264 -c:a aac -shortest -y "${outputPath}"`;
+  const cmd = `ffmpeg -f lavfi -i color=c=black:s=1920x1080:d=${shotAudio.duration} -i "${shotAudio.audioUrl}" -c:v libx264 -crf 18 -preset medium -c:a aac -shortest -y "${outputPath}"`;
   await execAsync(cmd, { timeout: 120000 });
   return outputPath;
 }
@@ -290,8 +294,8 @@ export async function composeEpisodeFromShots(
       .join("\n");
     await fs.writeFile(concatListPath, concatContent);
 
-    // Re-encode to ensure compatible formats (some filters produce non-concat-compatible streams)
-    const cmd = `ffmpeg -f concat -safe 0 -i "${concatListPath}" -c:v libx264 -c:a aac -movflags +faststart -y "${rawOutputPath}"`;
+    // Re-encode to ensure compatible formats with high quality
+    const cmd = `ffmpeg -f concat -safe 0 -i "${concatListPath}" -c:v libx264 -crf 18 -preset medium -c:a aac -b:a 128k -movflags +faststart -y "${rawOutputPath}"`;
     await execAsync(cmd, { timeout: 300000 });
   }
 
@@ -299,7 +303,7 @@ export async function composeEpisodeFromShots(
   let finalOutputPath = outputPath;
   if (options?.subtitlePath) {
     const escapedSubPath = options.subtitlePath.replace(/'/g, "'\\''");
-    const cmd = `ffmpeg -i "${rawOutputPath}" -vf "subtitles='${escapedSubPath}'" -c:v libx264 -c:a aac -movflags +faststart -y "${outputPath}"`;
+    const cmd = `ffmpeg -i "${rawOutputPath}" -vf "subtitles='${escapedSubPath}'" -c:v libx264 -crf 18 -preset medium -c:a copy -movflags +faststart -y "${outputPath}"`;
     await execAsync(cmd, { timeout: 300000 });
 
     // Remove raw version if it's a separate file

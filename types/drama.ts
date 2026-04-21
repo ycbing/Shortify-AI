@@ -39,6 +39,8 @@ export interface Character {
   appearance?: string;
   /** Personality traits (optional, for richer character portrayal) */
   personality?: string;
+  /** Reference image URL for consistent character appearance across shots */
+  referenceImageUrl?: string;
 }
 
 export interface Shot {

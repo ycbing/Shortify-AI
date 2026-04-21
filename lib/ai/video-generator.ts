@@ -30,15 +30,43 @@ interface CogVideoAsyncResult {
   }>;
 }
 
+export interface VideoGenerationOptions {
+  /** 视频质量模式: "quality" 高质量 | "speed" 快速生成 */
+  quality?: "quality" | "speed";
+  /** 分辨率: "1280x720" | "1920x1080" | "3840x2160"，默认 "1920x1080" */
+  size?: string;
+  /** 帧率: 30 | 60，默认 30 */
+  fps?: number;
+  /** 视频时长: 5 | 10（秒），默认 5 */
+  duration?: number;
+  /** 是否生成音频，默认 false */
+  withAudio?: boolean;
+  /** 最大重试次数（429 限流时），默认 3 */
+  maxRetries?: number;
+  /** 重试间隔基数（毫秒），默认 2000，每次重试指数退避 */
+  retryBaseMs?: number;
+}
+
 /**
  * 提交视频生成任务（异步）
- * 智谱 CogVideoX API: POST /videos/generations
+ * 智谱 CogVideoX-3 API: POST /videos/generations
  */
 export async function submitVideoGeneration(
   prompt: string,
   imageUrl?: string,
-  style: string = "realistic"
+  style: string = "realistic",
+  options?: VideoGenerationOptions
 ): Promise<{ taskId: string }> {
+  const {
+    quality = "quality",
+    size = "1920x1080",
+    fps,
+    duration,
+    withAudio,
+    maxRetries = 3,
+    retryBaseMs = 2000,
+  } = options || {};
+
   const stylePrompt = getStyleImagePrompt(style as "realistic" | "anime" | "ink" | "cyberpunk");
   const fullPrompt = imageUrl
     ? `基于这张图片生成短视频：${prompt}。画面风格：${stylePrompt}。电影感画面。`
@@ -47,37 +75,78 @@ export async function submitVideoGeneration(
   const body: Record<string, unknown> = {
     model: process.env.VIDEO_MODEL || "cogvideox-3",
     prompt: fullPrompt,
-    size: "1280x720",
+    quality,
+    size,
   };
 
   if (imageUrl) {
     body.image_url = imageUrl;
   }
 
-  const response = await fetch(`${COGVIDEO_BASE_URL}/videos/generations`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${GLM_API_KEY}`,
-    },
-    body: JSON.stringify(body),
-  });
+  // 可选参数（仅在有值时发送）
+  if (fps !== undefined) body.fps = fps;
+  if (duration !== undefined) body.duration = duration;
+  if (withAudio !== undefined) body.with_audio = withAudio;
 
-  if (!response.ok) {
-    const error = await response.text();
-    if (response.status === 429) {
-      throw new Error(`CogVideo API 限流，请稍后再试: ${error}`);
+  // 带重试的请求（429 限流 + 余额不足检测）
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await fetch(`${COGVIDEO_BASE_URL}/videos/generations`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${GLM_API_KEY}`,
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (response.ok) {
+        const result: CogVideoSubmitResponse = await response.json();
+        if (!result.id) {
+          throw new Error(`No task id returned: ${JSON.stringify(result)}`);
+        }
+        return { taskId: result.id };
+      }
+
+      const errorText = await response.text();
+
+      // 余额不足 — 不重试，直接报错
+      if (response.status === 402 || errorText.includes("insufficient") || errorText.includes("余额")) {
+        throw new Error(`CogVideo API 余额不足，请充值后重试: ${errorText}`);
+      }
+
+      // 429 限流 — 重试（指数退避）
+      if (response.status === 429) {
+        lastError = new Error(`CogVideo API 限流 (attempt ${attempt + 1}/${maxRetries + 1}): ${errorText}`);
+        if (attempt < maxRetries) {
+          const waitMs = retryBaseMs * Math.pow(2, attempt) + Math.random() * 1000;
+          console.warn(`[video-generator] 429 rate limited, retrying in ${Math.round(waitMs)}ms...`);
+          await new Promise((resolve) => setTimeout(resolve, waitMs));
+          continue;
+        }
+        break; // 重试次数用完
+      }
+
+      // 其他错误 — 不重试
+      throw new Error(`CogVideo API error: ${response.status} - ${errorText}`);
+    } catch (err) {
+      if (err instanceof Error && (err.message.includes("余额不足") || err.message.includes("CogVideo API error:"))) {
+        throw err; // 余额不足和一般错误不重试
+      }
+      lastError = err instanceof Error ? err : new Error(String(err));
+      if (attempt < maxRetries) {
+        const waitMs = retryBaseMs * Math.pow(2, attempt) + Math.random() * 1000;
+        console.warn(`[video-generator] request failed, retrying in ${Math.round(waitMs)}ms...`, lastError.message);
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+        continue;
+      }
+      break;
     }
-    throw new Error(`CogVideo API error: ${response.status} - ${error}`);
   }
 
-  const result: CogVideoSubmitResponse = await response.json();
-
-  if (!result.id) {
-    throw new Error(`No task id returned: ${JSON.stringify(result)}`);
-  }
-
-  return { taskId: result.id };
+  throw lastError || new Error("Video generation failed after retries");
 }
 
 /**

@@ -125,7 +125,13 @@ suspense(悬疑), romantic(浪漫), tense(紧张), calm(平静), dramatic(戏剧
 - sceneDescription 中要包含完整的环境描述，画风：${STYLE_IMAGE_PROMPT[style]}
 
 ## 角色描述 JSON 格式示例
-{ "name": "苏小暖", "description": "女主角，活泼开朗", "voiceId": "zh-CN-XiaoxiaoNeural", "appearance": "20岁女大学生，黑色长发扎马尾，大眼睛双眼皮，皮肤白皙，身材纤细，穿白色T恤和浅蓝色牛仔裤，戴银色项链" }`;
+{ "name": "苏小暖", "description": "女主角，活泼开朗", "voiceId": "zh-CN-XiaoxiaoNeural", "appearance": "20岁女大学生，黑色长发扎马尾，大眼睛双眼皮，皮肤白皙，身材纤细，穿白色T恤和浅蓝色牛仔裤，戴银色项链", "referenceImageUrl": "" }
+
+## 镜头级角色一致性规则（核心）
+- 每个 shot 的 visual 描述中，如果出现了某个角色，必须将该角色的完整 appearance 描述嵌入到 visual 文本中
+- 这确保了图像生成时，每个镜头对同一角色的描述完全一致
+- 示例：如果角色"苏小暖"出现在 shot 中，visual 必须包含"苏小暖，20岁女大学生，黑色长发扎马尾，大眼睛双眼皮，皮肤白皙，身材纤细，穿白色T恤和浅蓝色牛仔裤，戴银色项链"这段固定描述
+- 不同镜头中同一角色的外观描述必须**完全相同**，不能有任何变化`;
 
   const userPrompt = `请创作一部短剧。
 主题：${theme}
