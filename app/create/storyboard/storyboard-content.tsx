@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { StepIndicator } from "@/components/create/step-indicator";
 import { ShotCard } from "@/components/drama/shot-card";
-import { Loader2, ArrowRight, ArrowLeft, Image, ChevronDown, ChevronUp, Film } from "lucide-react";
+import { Loader2, ArrowRight, ArrowLeft, ImageIcon, ChevronDown, ChevronUp, Film, Square } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { useTaskPolling } from "@/lib/hooks/use-task-polling";
@@ -35,6 +35,15 @@ interface StoryboardItem {
   }>;
 }
 
+interface DramaEpisodeResponse {
+  id: string;
+  episodeNumber: number;
+  title?: string | null;
+  imageUrl?: string | null;
+  narrationText?: string | null;
+  shotData?: StoryboardItem["shotData"];
+}
+
 export default function StoryboardPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -59,7 +68,7 @@ export default function StoryboardPageContent() {
       if (res.ok) {
         const data = await res.json();
         setItems(
-          data.episodes.map((ep: any) => ({
+          data.episodes.map((ep: DramaEpisodeResponse) => ({
             id: ep.id,
             episodeNumber: ep.episodeNumber,
             title: ep.title || `第${ep.episodeNumber}集`,
@@ -107,20 +116,17 @@ export default function StoryboardPageContent() {
       router.push("/create");
       return;
     }
-    fetchEpisodes();
-  }, [dramaId]);
+    queueMicrotask(() => {
+      void fetchEpisodes();
+    });
+  }, [dramaId, fetchEpisodes, router]);
 
   useEffect(() => {
     if (!activeTaskId) return;
     void startPolling();
   }, [activeTaskId, startPolling]);
 
-  useEffect(() => {
-    if (!activeTask?.progress) return;
-    setGenerating(true);
-    setGeneratingIndex(-1);
-    setTaskProgressLabel(activeTask.progress.label || "");
-  }, [activeTask]);
+  const progressLabel = activeTask?.progress?.label || taskProgressLabel;
 
   useEffect(() => {
     if (!dramaId || items.length === 0 || activeTaskId || generating) return;
@@ -136,6 +142,7 @@ export default function StoryboardPageContent() {
         if (!res.ok || cancelled) return;
         const latestTask = Array.isArray(data.tasks) ? data.tasks[0] : null;
         if (latestTask?.id) {
+          setGenerating(true);
           setActiveTaskId(latestTask.id);
         }
       } catch {
@@ -204,6 +211,25 @@ export default function StoryboardPageContent() {
       }
     } catch {
       toast.error("重新生成失败");
+    }
+  };
+
+  const handleCancelTask = async () => {
+    if (!activeTaskId) return;
+    try {
+      const res = await fetch(`/api/tasks/${activeTaskId}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error || "取消任务失败");
+        return;
+      }
+      setGenerating(false);
+      setGeneratingIndex(-1);
+      setActiveTaskId(null);
+      setTaskProgressLabel("");
+      toast.success("分镜任务已取消");
+    } catch {
+      setError("取消任务失败");
     }
   };
 
@@ -287,14 +313,20 @@ export default function StoryboardPageContent() {
             <div className="flex items-center gap-3 mb-3">
               <div className="relative">
                 <div className="w-10 h-10 rounded-full border-2 border-emerald-500/30 border-t-emerald-500 animate-spin" />
-                <Image className="h-4 w-4 text-emerald-400 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
+                <ImageIcon className="h-4 w-4 text-emerald-400 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-emerald-400">
-                  {taskProgressLabel || `正在生成第 ${generatingIndex >= 0 ? generatingIndex + 1 : "?"} / ${totalCount} 集分镜`}
+                  {progressLabel || `正在生成第 ${generatingIndex >= 0 ? generatingIndex + 1 : "?"} / ${totalCount} 集分镜`}
                 </p>
                 <p className="text-xs text-muted-foreground">每张图片需要 10-20 秒</p>
               </div>
+              {activeTaskId && (
+                <Button variant="outline" size="sm" onClick={handleCancelTask}>
+                  <Square className="h-3.5 w-3.5 mr-1.5" />
+                  取消
+                </Button>
+              )}
             </div>
             <div className="w-full bg-emerald-500/20 rounded-full h-1.5 overflow-hidden">
               <div

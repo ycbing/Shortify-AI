@@ -9,6 +9,7 @@ export type TaskListFilters = {
   type?: string;
   status?: string;
   latest?: boolean;
+  limit?: number;
 };
 
 export type TaskProgress = {
@@ -54,7 +55,15 @@ export async function listTasksForUser(userId: string, filters: TaskListFilters 
     .where(and(...conditions))
     .orderBy(desc(generationTasks.startedAt));
 
-  return filters.latest ? rows.slice(0, 1) : rows;
+  if (filters.latest) {
+    return rows.slice(0, 1);
+  }
+
+  if (filters.limit && filters.limit > 0) {
+    return rows.slice(0, filters.limit);
+  }
+
+  return rows;
 }
 
 export async function getTaskForUser(taskId: string, userId: string) {
@@ -164,6 +173,20 @@ export async function buildTaskProgress(task: {
 
   if (task.type === "compose") {
     const total = asNumber(inputData.episodeCount);
+    const trackedCompleted = asNumber(outputData.completedCount);
+    if (trackedCompleted > 0 || task.status === "completed") {
+      const completed = task.status === "completed"
+        ? (trackedCompleted || total)
+        : trackedCompleted;
+
+      return {
+        completed,
+        total,
+        unit: "episodes",
+        label: total > 0 ? `已合成 ${completed}/${total} 集视频` : "正在合成视频",
+      };
+    }
+
     const [{ count }] = await db
       .select({ count: sql<number>`count(*)::int` })
       .from(episodes)

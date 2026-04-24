@@ -119,7 +119,7 @@ export const generationTasks = pgTable(
       .references(() => dramas.id, { onDelete: "cascade" }),
     episodeId: text("episode_id").references(() => episodes.id, { onDelete: "set null" }),
     type: text("type").notNull(), // script/storyboard/voiceover/compose/subtitle/video
-    status: text("status").default("pending"), // pending/processing/completed/failed
+    status: text("status").default("pending"), // pending/processing/completed/failed/cancelled
     inputData: jsonb("input_data"),
     outputData: jsonb("output_data"),
     errorMessage: text("error_message"),

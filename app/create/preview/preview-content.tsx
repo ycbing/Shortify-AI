@@ -3,11 +3,12 @@
 import { useEffect, useState, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { StepIndicator } from "@/components/create/step-indicator";
 import { VoiceoverPanel } from "@/components/drama/voiceover-panel";
 import { VideoPreview } from "@/components/drama/video-preview";
 import { ExportDialog } from "@/components/drama/export-dialog";
-import { Loader2, ArrowLeft, Film, Check, AlertCircle } from "lucide-react";
+import { Loader2, ArrowLeft, Film, Check, AlertCircle, RefreshCw, Clock3, Square } from "lucide-react";
 import Link from "next/link";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
@@ -29,6 +30,16 @@ interface EpisodeData {
   videoUrl: string | null;
   subtitleUrl: string | null;
   duration: number | null;
+  shotData?: Array<{ aiVideoUrl?: string | null }>;
+}
+
+interface TaskSummary {
+  id: string;
+  type: string;
+  status: string;
+  errorMessage?: string | null;
+  startedAt?: string | null;
+  completedAt?: string | null;
 }
 
 /** Convert a local upload path or COS URL to an accessible URL */
@@ -62,6 +73,7 @@ export default function PreviewPageContent() {
   const [error, setError] = useState("");
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [taskProgressLabel, setTaskProgressLabel] = useState("");
+  const [taskHistory, setTaskHistory] = useState<TaskSummary[]>([]);
 
   const fetchEpisodes = useCallback(async (showLoading = true) => {
     if (!dramaId) return;
@@ -92,25 +104,58 @@ export default function PreviewPageContent() {
     }
   }, [dramaId]);
 
+  const fetchTaskHistory = useCallback(async () => {
+    if (!dramaId) return;
+    try {
+      const res = await fetch(`/api/tasks?dramaId=${dramaId}&limit=8`);
+      const data = await res.json();
+      if (!res.ok) return;
+      setTaskHistory(Array.isArray(data.tasks) ? data.tasks : []);
+    } catch {
+      // ignore history fetch errors
+    }
+  }, [dramaId]);
+
   const { task: activeTask, pollError, startPolling, stopPolling } = useTaskPolling(activeTaskId, {
     autoStart: false,
     onCompleted: async (task) => {
       const isVoiceoverTask = task.type === "voiceover";
+      const isComposeTask = task.type === "compose";
+      const mergedUrl = typeof task.outputData?.mergedUrl === "string"
+        ? task.outputData.mergedUrl
+        : null;
       setLoadingAction("");
       setActionProgress({ current: 0, total: 0 });
       setActiveTaskId(null);
       setTaskProgressLabel("");
+      if (isComposeTask && mergedUrl) {
+        setMergedVideoUrl(toPublicUrl(mergedUrl));
+      }
       await fetchEpisodes(false);
-      toast.success(isVoiceoverTask ? "配音生成完成！" : "AI 视频生成完成！");
+      await fetchTaskHistory();
+      toast.success(
+        isVoiceoverTask
+          ? "配音生成完成！"
+          : isComposeTask
+            ? "视频合成完成！"
+            : "AI 视频生成完成！"
+      );
     },
     onFailed: async (task) => {
-      const errorMessage = task.errorMessage || (task.type === "voiceover" ? "配音生成失败" : "AI 视频生成失败");
+      const errorMessage = task.errorMessage || (
+        task.type === "voiceover"
+          ? "配音生成失败"
+          : task.type === "compose"
+            ? "视频合成失败"
+            : "AI 视频生成失败"
+      );
       setError(errorMessage);
       setLoadingAction("");
       setActionProgress({ current: 0, total: 0 });
       setActiveTaskId(null);
       setTaskProgressLabel("");
       await fetchEpisodes(false);
+      await fetchTaskHistory();
       toast.error(errorMessage);
     },
   });
@@ -120,14 +165,23 @@ export default function PreviewPageContent() {
       router.push("/create");
       return;
     }
-    fetchEpisodes();
-  }, [dramaId]);
+    queueMicrotask(() => {
+      void fetchEpisodes();
+      void fetchTaskHistory();
+    });
+  }, [dramaId, fetchEpisodes, fetchTaskHistory, router]);
 
-  const startTaskPolling = useCallback((taskId: string, type: "video" | "voiceover") => {
+  const startTaskPolling = useCallback((taskId: string, type: "video" | "voiceover" | "compose") => {
     setError("");
     setTaskProgressLabel("");
     setActionProgress({ current: 0, total: 0 });
-    setLoadingAction(type === "voiceover" ? "voiceover" : "video-gen");
+    setLoadingAction(
+      type === "voiceover"
+        ? "voiceover"
+        : type === "compose"
+          ? "compose"
+          : "video-gen"
+    );
     setActiveTaskId(taskId);
   }, []);
 
@@ -136,25 +190,18 @@ export default function PreviewPageContent() {
     void startPolling();
   }, [activeTaskId, startPolling]);
 
-  useEffect(() => {
-    const progress = activeTask?.progress;
-    if (progress) {
-      setTaskProgressLabel(progress.label || "");
-      setActionProgress({
-        current: progress.completed || 0,
-        total: progress.total || 0,
-      });
-    }
-  }, [activeTask]);
+  const activeProgress = activeTask?.progress;
 
   useEffect(() => {
     if (!pollError) return;
-    setError(pollError);
-    setLoadingAction("");
-    setActionProgress({ current: 0, total: 0 });
-    setActiveTaskId(null);
-    setTaskProgressLabel("");
-    toast.error(pollError);
+    queueMicrotask(() => {
+      setError(pollError);
+      setLoadingAction("");
+      setActionProgress({ current: 0, total: 0 });
+      setActiveTaskId(null);
+      setTaskProgressLabel("");
+      toast.error(pollError);
+    });
   }, [pollError]);
 
   // Auto-resume polling if drama is in generating state
@@ -220,6 +267,38 @@ export default function PreviewPageContent() {
     };
   }, [activeTaskId, dramaId, episodes, loadingAction, startTaskPolling]);
 
+  useEffect(() => {
+    if (!dramaId || loadingAction === "compose" || activeTaskId) {
+      return;
+    }
+
+    const needsCompose = episodes.some((episode) => !episode.videoUrl && episode.imageUrl && episode.voiceoverUrl);
+    if (!needsCompose) return;
+
+    let cancelled = false;
+
+    const resumeTaskPolling = async () => {
+      try {
+        const res = await fetch(`/api/tasks?dramaId=${dramaId}&type=compose&status=processing&latest=1`);
+        const data = await res.json();
+        if (!res.ok || cancelled) return;
+
+        const latestTask = Array.isArray(data.tasks) ? data.tasks[0] : null;
+        if (latestTask?.id) {
+          startTaskPolling(latestTask.id, "compose");
+        }
+      } catch {
+        // ignore resume errors
+      }
+    };
+
+    void resumeTaskPolling();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTaskId, dramaId, episodes, loadingAction, startTaskPolling]);
+
   const handleGenerateAllVoiceovers = async () => {
     if (!dramaId) return;
     setLoadingAction("voiceover");
@@ -245,6 +324,7 @@ export default function PreviewPageContent() {
       }
 
       if (data.taskId) {
+        await fetchTaskHistory();
         startTaskPolling(data.taskId, "voiceover");
         toast.success(data.message || "配音生成任务已启动");
         return;
@@ -278,6 +358,7 @@ export default function PreviewPageContent() {
 
       if (res.ok) {
         await fetchEpisodes();
+        await fetchTaskHistory();
         toast.success(`第 ${ep.episodeNumber} 集配音生成完成`);
       } else {
         const errData = await res.json().catch(() => ({}));
@@ -307,28 +388,29 @@ export default function PreviewPageContent() {
         body: JSON.stringify({ dramaId }),
       });
 
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        const data = await res.json();
-        if (data.mergedUrl) {
-          setMergedVideoUrl(toPublicUrl(data.mergedUrl));
+        await fetchTaskHistory();
+        if (data.taskId) {
+          startTaskPolling(data.taskId, "compose");
+          toast.success(data.message || "视频合成任务已启动");
+          return;
         }
-        await fetchEpisodes();
-        toast.success(`视频合成完成，共 ${data.videoCount || episodes.length} 集`);
+        setLoadingAction("");
+        toast.warning("合成任务已启动，但未返回任务编号");
       } else {
-        const errData = await res.json().catch(() => ({}));
-        const errMsg = errData.error || "视频合成失败";
+        const errMsg = data.error || "视频合成失败";
         setError(errMsg);
         toast.error(errMsg);
-        if (errData.code === "INSUFFICIENT_CREDITS") {
+        if (data.code === "INSUFFICIENT_CREDITS") {
           toast.error("积分不足，请前往设置页面充值", { duration: 5000 });
         }
+        setLoadingAction("");
       }
     } catch {
       setError("视频合成失败");
       toast.error("网络错误，请重试");
-    } finally {
       setLoadingAction("");
-      setActionProgress({ current: 0, total: 0 });
     }
   };
 
@@ -345,6 +427,7 @@ export default function PreviewPageContent() {
 
       if (res.ok) {
         const data = await res.json();
+        await fetchTaskHistory();
         toast.success(data.message || "AI 视频生成已启动");
         if (data.taskId) {
           startTaskPolling(data.taskId, "video");
@@ -388,27 +471,106 @@ export default function PreviewPageContent() {
   }));
 
   const getActionLabel = () => {
+    const activeLabel = activeProgress?.label || taskProgressLabel;
     if (loadingAction.startsWith("voiceover")) {
-      if (taskProgressLabel) return taskProgressLabel;
+      if (activeLabel) return activeLabel;
       const isSingle = loadingAction.includes("-");
       return isSingle
-        ? `正在生成第 ${actionProgress.current}/${actionProgress.total} 集配音...`
-        : actionProgress.total > 0
-          ? `正在生成配音... (${actionProgress.current}/${actionProgress.total})`
+        ? `正在生成第 ${displayActionProgress.current}/${displayActionProgress.total} 集配音...`
+        : displayActionProgress.total > 0
+          ? `正在生成配音... (${displayActionProgress.current}/${displayActionProgress.total})`
           : "正在生成配音...";
     }
     if (loadingAction === "compose") {
-      return actionProgress.total > 0
-        ? `正在合成第 ${actionProgress.current}/${actionProgress.total} 集...`
+      if (activeLabel) return activeLabel;
+      return displayActionProgress.total > 0
+        ? `正在合成第 ${displayActionProgress.current}/${displayActionProgress.total} 集...`
         : "正在合成视频...";
     }
     if (loadingAction === "video-gen") {
-      if (taskProgressLabel) return taskProgressLabel;
-      return actionProgress.total > 0
-        ? `AI 视频生成中... (${actionProgress.current}/${actionProgress.total})`
+      if (activeLabel) return activeLabel;
+      return displayActionProgress.total > 0
+        ? `AI 视频生成中... (${displayActionProgress.current}/${displayActionProgress.total})`
         : "AI 视频生成中...";
     }
     return "处理中...";
+  };
+
+  const displayActionProgress = activeProgress
+    ? {
+        current: activeProgress.completed || 0,
+        total: activeProgress.total || 0,
+      }
+    : actionProgress;
+
+  const formatTaskType = (type: string) => {
+    if (type === "voiceover") return "配音";
+    if (type === "compose") return "合成";
+    if (type === "video") return "AI 视频";
+    if (type === "storyboard") return "分镜";
+    if (type === "script") return "剧本";
+    return type;
+  };
+
+  const formatTaskStatus = (status: string) => {
+    if (status === "processing") return "进行中";
+    if (status === "completed") return "已完成";
+    if (status === "failed") return "失败";
+    if (status === "cancelled") return "已取消";
+    return status;
+  };
+
+  const getTaskStatusClasses = (status: string) => {
+    if (status === "completed") return "bg-emerald-500/10 text-emerald-400 border-emerald-500/30";
+    if (status === "failed") return "bg-red-500/10 text-red-400 border-red-500/30";
+    if (status === "cancelled") return "bg-zinc-500/10 text-zinc-300 border-zinc-500/30";
+    return "bg-amber-500/10 text-amber-400 border-amber-500/30";
+  };
+
+  const formatTaskTime = (value?: string | null) => {
+    if (!value) return "刚刚";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "刚刚";
+    return date.toLocaleString("zh-CN", {
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  const handleRetryTask = async (task: TaskSummary) => {
+    if (task.type === "voiceover") {
+      await handleGenerateAllVoiceovers();
+      return;
+    }
+    if (task.type === "compose") {
+      await handleComposeAll();
+      return;
+    }
+    if (task.type === "video") {
+      await handleGenerateVideos();
+    }
+  };
+
+  const handleCancelTask = async () => {
+    if (!activeTaskId) return;
+    try {
+      const res = await fetch(`/api/tasks/${activeTaskId}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error || "取消任务失败");
+        return;
+      }
+      setLoadingAction("");
+      setActionProgress({ current: 0, total: 0 });
+      setTaskProgressLabel("");
+      setActiveTaskId(null);
+      await fetchTaskHistory();
+      toast.success("任务已取消");
+    } catch {
+      setError("取消任务失败");
+    }
   };
 
   return (
@@ -467,19 +629,83 @@ export default function PreviewPageContent() {
                   请耐心等待，不要离开此页面
                 </p>
               </div>
+              {activeTaskId && (
+                <Button variant="outline" size="sm" onClick={handleCancelTask}>
+                  <Square className="h-3.5 w-3.5 mr-1.5" />
+                  取消
+                </Button>
+              )}
             </div>
-            {actionProgress.total > 0 && (
+            {displayActionProgress.total > 0 && (
               <div className="w-full bg-emerald-500/20 rounded-full h-1.5 overflow-hidden">
                 <div
                   className="h-full bg-emerald-500 rounded-full transition-all duration-700 ease-out"
                   style={{
-                    width: `${(actionProgress.current / actionProgress.total) * 100}%`,
+                    width: `${(displayActionProgress.current / displayActionProgress.total) * 100}%`,
                   }}
                 />
               </div>
             )}
           </div>
         )}
+
+        <div className="mb-6 sm:mb-8 border border-border/50 rounded-lg p-4 sm:p-5 bg-card/40">
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <div>
+              <h2 className="text-sm sm:text-base font-semibold">最近任务</h2>
+              <p className="text-xs text-muted-foreground">查看失败原因，也可以直接从这里重试</p>
+            </div>
+            <Button variant="outline" size="sm" onClick={() => void fetchTaskHistory()}>
+              <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+              刷新
+            </Button>
+          </div>
+          <div className="space-y-3">
+            {taskHistory.length === 0 ? (
+              <div className="text-sm text-muted-foreground">还没有任务记录，开始生成后会显示在这里。</div>
+            ) : (
+              taskHistory.map((task) => (
+                <div
+                  key={task.id}
+                  className="border border-border/50 rounded-lg p-3 sm:p-4 bg-background/40"
+                >
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                        <Badge variant="outline">{formatTaskType(task.type)}</Badge>
+                        <Badge variant="outline" className={getTaskStatusClasses(task.status)}>
+                          {formatTaskStatus(task.status)}
+                        </Badge>
+                      </div>
+                      <div className="text-xs text-muted-foreground flex items-center gap-1.5">
+                        <Clock3 className="h-3.5 w-3.5" />
+                        <span>
+                          {formatTaskTime(task.startedAt)}
+                          {task.completedAt ? ` -> ${formatTaskTime(task.completedAt)}` : ""}
+                        </span>
+                      </div>
+                      {task.errorMessage && (
+                        <p className="mt-2 text-xs sm:text-sm text-red-400">{task.errorMessage}</p>
+                      )}
+                    </div>
+                    {(task.type === "voiceover" || task.type === "compose" || task.type === "video") && task.status !== "processing" && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void handleRetryTask(task)}
+                        disabled={Boolean(loadingAction)}
+                        className="sm:self-start"
+                      >
+                        <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                        重试
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
 
         <Tabs defaultValue="preview" className="space-y-4 sm:space-y-6">
           {/* Tabs — horizontally scrollable on mobile */}
@@ -526,8 +752,7 @@ export default function PreviewPageContent() {
                 </p>
                 <div className="space-y-2 mb-4 sm:mb-6">
                   {episodes.map((ep) => {
-                    const epData = ep as any;
-                    const shots = Array.isArray(epData.shotData) ? epData.shotData : [];
+                    const shots = Array.isArray(ep.shotData) ? ep.shotData : [];
                     const hasVideo = ep.videoUrl;
                     const isGenerating = loadingAction === "video-gen" && shots.length > 0 && !hasVideo;
                     return (
@@ -554,8 +779,8 @@ export default function PreviewPageContent() {
                   {loadingAction === "video-gen" ? (
                     <>
                       <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      {actionProgress.total > 0
-                        ? `AI 视频生成中 ${actionProgress.current}/${actionProgress.total} 集...`
+                      {displayActionProgress.total > 0
+                        ? `AI 视频生成中 ${displayActionProgress.current}/${displayActionProgress.total} 集...`
                         : "AI 视频生成中..."}
                     </>
                   ) : (

@@ -14,6 +14,8 @@ import { getOwnedDrama } from "@/lib/dramas";
 import {
   completeGenerationTask,
   failGenerationTask,
+  getActiveGenerationTask,
+  isGenerationTaskCancelled,
   updateGenerationTaskProgress,
 } from "@/lib/generation";
 
@@ -153,6 +155,15 @@ export async function POST(request: NextRequest) {
       .where(eq(episodes.dramaId, dramaId))
       .orderBy(episodes.episodeNumber);
 
+    const activeTask = await getActiveGenerationTask(dramaId, "storyboard");
+    if (activeTask) {
+      return NextResponse.json({
+        taskId: activeTask.id,
+        message: "已有分镜任务正在进行，已为你恢复到当前任务",
+        episodeCount: allEpisodes.length,
+      });
+    }
+
     const totalCredits = allEpisodes.length * CREDIT_COSTS.storyboard;
     const bulkCreditCheck = await checkCredits(session.user.id, totalCredits);
     if (!bulkCreditCheck.ok) {
@@ -229,6 +240,10 @@ async function processStoryboardGeneration({
     const results: { episodeNumber: number; imageUrl: string; shotImages?: { shotNumber: number; imageUrl: string }[] }[] = [];
 
     for (const episode of allEpisodes) {
+      if (await isGenerationTaskCancelled(taskId)) {
+        return;
+      }
+
       try {
         if (episode.shotData && Array.isArray(episode.shotData)) {
           const result = await handleShotStoryboard(episode, style, dramaId, uploadDir, characters);

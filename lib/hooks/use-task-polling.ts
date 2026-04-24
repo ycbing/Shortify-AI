@@ -15,6 +15,7 @@ type TaskStatus = {
   status: string;
   errorMessage?: string | null;
   progress?: TaskProgress;
+  outputData?: Record<string, unknown> | null;
 };
 
 type UseTaskPollingOptions = {
@@ -44,58 +45,66 @@ export function useTaskPolling(taskId: string | null, options: UseTaskPollingOpt
     setIsPolling(false);
   }, []);
 
-  const pollOnce = useCallback(async () => {
-    if (!taskId) return null;
-
-    const res = await fetch(`/api/tasks/${taskId}`);
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.error || "获取任务状态失败");
-    }
-
-    const nextTask = data.task as TaskStatus;
-    setTask(nextTask);
-    setPollError(null);
-
-    if (nextTask.status === "completed") {
-      clearPolling();
-      await onCompleted?.(nextTask);
-      return nextTask;
-    }
-
-    if (nextTask.status === "failed") {
-      clearPolling();
-      await onFailed?.(nextTask);
-      return nextTask;
-    }
-
-    timerRef.current = window.setTimeout(() => {
-      void pollOnce();
-    }, intervalMs);
-
-    return nextTask;
-  }, [clearPolling, intervalMs, onCompleted, onFailed, taskId]);
-
   const startPolling = useCallback(async () => {
     if (!taskId) return;
     clearPolling();
     setIsPolling(true);
 
     try {
-      await pollOnce();
+      const poll = async (): Promise<TaskStatus | null> => {
+        const res = await fetch(`/api/tasks/${taskId}`);
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error || "获取任务状态失败");
+        }
+
+        const nextTask = data.task as TaskStatus;
+        setTask(nextTask);
+        setPollError(null);
+
+        if (nextTask.status === "completed") {
+          clearPolling();
+          await onCompleted?.(nextTask);
+          return nextTask;
+        }
+
+        if (nextTask.status === "failed") {
+          clearPolling();
+          await onFailed?.(nextTask);
+          return nextTask;
+        }
+
+        if (nextTask.status === "cancelled") {
+          clearPolling();
+          await onFailed?.({
+            ...nextTask,
+            errorMessage: nextTask.errorMessage || "任务已取消",
+          });
+          return nextTask;
+        }
+
+        timerRef.current = window.setTimeout(() => {
+          void poll();
+        }, intervalMs);
+
+        return nextTask;
+      };
+
+      await poll();
     } catch (error) {
       clearPolling();
       setPollError(error instanceof Error ? error.message : "任务轮询失败");
     }
-  }, [clearPolling, pollOnce, taskId]);
+  }, [clearPolling, intervalMs, onCompleted, onFailed, taskId]);
 
   useEffect(() => {
     if (!taskId || !autoStart) {
-      clearPolling();
       return;
     }
 
-    void startPolling();
+    queueMicrotask(() => {
+      void startPolling();
+    });
     return clearPolling;
   }, [autoStart, clearPolling, startPolling, taskId]);
 

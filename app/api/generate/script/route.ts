@@ -9,7 +9,12 @@ import { isScriptV2 } from "@/types/drama";
 import type { DramaGenreType, DramaStyleType, GeneratedScriptV2 } from "@/types/drama";
 import { checkCredits, CREDIT_COSTS, requireCreditDeduction } from "@/lib/credits";
 import { getOwnedDrama } from "@/lib/dramas";
-import { completeGenerationTask, failGenerationTask } from "@/lib/generation";
+import {
+  completeGenerationTask,
+  failGenerationTask,
+  getActiveGenerationTask,
+  isGenerationTaskCancelled,
+} from "@/lib/generation";
 
 export async function POST(request: NextRequest) {
   let taskId: string | null = null;
@@ -18,15 +23,6 @@ export async function POST(request: NextRequest) {
     const session = await auth();
     if (!session?.user?.id) {
       return NextResponse.json({ error: "未登录" }, { status: 401 });
-    }
-
-    // Check credits
-    const creditCheck = await checkCredits(session.user.id, CREDIT_COSTS.script);
-    if (!creditCheck.ok) {
-      return NextResponse.json(
-        { error: `积分不足，需要 ${CREDIT_COSTS.script} 积分，当前余额 ${creditCheck.balance} 积分`, code: "INSUFFICIENT_CREDITS" },
-        { status: 402 }
-      );
     }
 
     const body = await request.json();
@@ -41,6 +37,22 @@ export async function POST(request: NextRequest) {
 
     if (!drama) {
       return NextResponse.json({ error: "短剧不存在" }, { status: 404 });
+    }
+
+    const activeTask = await getActiveGenerationTask(dramaId, "script");
+    if (activeTask) {
+      return NextResponse.json({
+        taskId: activeTask.id,
+        message: "已有剧本任务正在进行，已为你恢复到当前任务",
+      });
+    }
+
+    const creditCheck = await checkCredits(session.user.id, CREDIT_COSTS.script);
+    if (!creditCheck.ok) {
+      return NextResponse.json(
+        { error: `积分不足，需要 ${CREDIT_COSTS.script} 积分，当前余额 ${creditCheck.balance} 积分`, code: "INSUFFICIENT_CREDITS" },
+        { status: 402 }
+      );
     }
 
     // Create generation task
@@ -66,6 +78,13 @@ export async function POST(request: NextRequest) {
       (drama.style as DramaStyleType) || "realistic",
       drama.episodeCount || 3
     );
+
+    if (await isGenerationTaskCancelled(taskId)) {
+      return NextResponse.json({
+        taskId,
+        message: "剧本任务已取消",
+      });
+    }
 
     // Deduct credits after successful generation
     await requireCreditDeduction(session.user.id, "script", undefined, dramaId);

@@ -12,6 +12,8 @@ import { getOwnedDrama } from "@/lib/dramas";
 import {
   completeGenerationTask,
   failGenerationTask,
+  getActiveGenerationTask,
+  isGenerationTaskCancelled,
   updateGenerationTaskProgress,
 } from "@/lib/generation";
 
@@ -142,6 +144,15 @@ export async function POST(request: NextRequest) {
       .orderBy(episodes.episodeNumber);
 
     // Check credits for all episodes
+    const activeTask = await getActiveGenerationTask(dramaId, "voiceover");
+    if (activeTask) {
+      return NextResponse.json({
+        taskId: activeTask.id,
+        message: "已有配音任务正在进行，已为你恢复到当前任务",
+        episodeCount: allEpisodes.length,
+      });
+    }
+
     const totalVoiceoverCredits = allEpisodes.length * CREDIT_COSTS.voiceover;
     const voiceCreditCheck = await checkCredits(session.user.id, totalVoiceoverCredits);
     if (!voiceCreditCheck.ok) {
@@ -212,6 +223,10 @@ async function processVoiceoverGeneration({
     const results: { episodeNumber: number; voiceoverUrl: string; duration: number; shotAudios?: unknown[] }[] = [];
 
     for (const episode of allEpisodes) {
+      if (await isGenerationTaskCancelled(taskId)) {
+        return;
+      }
+
       try {
         if (episode.shotData && Array.isArray(episode.shotData)) {
           const shots = episode.shotData as Shot[];

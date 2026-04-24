@@ -1,6 +1,36 @@
-import { eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { dramas, generationTasks } from "@/lib/db/schema";
+
+export async function getActiveGenerationTask(
+  dramaId: string,
+  type: string
+) {
+  const [task] = await db
+    .select()
+    .from(generationTasks)
+    .where(
+      and(
+        eq(generationTasks.dramaId, dramaId),
+        eq(generationTasks.type, type),
+        eq(generationTasks.status, "processing")
+      )
+    )
+    .orderBy(desc(generationTasks.startedAt))
+    .limit(1);
+
+  return task;
+}
+
+export async function isGenerationTaskCancelled(taskId: string) {
+  const [task] = await db
+    .select({ status: generationTasks.status })
+    .from(generationTasks)
+    .where(eq(generationTasks.id, taskId))
+    .limit(1);
+
+  return task?.status === "cancelled";
+}
 
 export async function completeGenerationTask(
   taskId: string,
@@ -39,6 +69,29 @@ export async function failGenerationTask(
     .update(generationTasks)
     .set({
       status: "failed",
+      errorMessage,
+      completedAt: new Date(),
+    })
+    .where(eq(generationTasks.id, taskId));
+
+  await db
+    .update(dramas)
+    .set({
+      status: "error",
+      updatedAt: new Date(),
+    })
+    .where(eq(dramas.id, dramaId));
+}
+
+export async function cancelGenerationTask(
+  taskId: string,
+  dramaId: string,
+  errorMessage = "任务已取消"
+) {
+  await db
+    .update(generationTasks)
+    .set({
+      status: "cancelled",
       errorMessage,
       completedAt: new Date(),
     })

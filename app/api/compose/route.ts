@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { dramas, episodes, generationTasks } from "@/lib/db/schema";
+import { dramas, episodes, generationTasks, type Episode } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { composeVideo, composeEpisodeFromShots, mergeVideos } from "@/lib/ai/video-composer";
@@ -14,7 +14,13 @@ import path from "path";
 import fs from "fs/promises";
 import { checkCredits, CREDIT_COSTS, requireCreditDeduction } from "@/lib/credits";
 import { getOwnedDrama } from "@/lib/dramas";
-import { completeGenerationTask, failGenerationTask } from "@/lib/generation";
+import {
+  getActiveGenerationTask,
+  isGenerationTaskCancelled,
+  completeGenerationTask,
+  failGenerationTask,
+  updateGenerationTaskProgress,
+} from "@/lib/generation";
 
 /**
  * Convert an absolute local path to a relative uploads path for database storage.
@@ -229,6 +235,15 @@ export async function POST(request: NextRequest) {
       .orderBy(episodes.episodeNumber);
 
     // Check credits for all episodes
+    const activeTask = await getActiveGenerationTask(dramaId, "compose");
+    if (activeTask) {
+      return NextResponse.json({
+        taskId: activeTask.id,
+        message: "已有合成任务正在进行，已为你恢复到当前任务",
+        episodeCount: allEpisodes.length,
+      });
+    }
+
     const totalComposeCredits = allEpisodes.length * CREDIT_COSTS.compose;
     const composeCreditCheck = await checkCredits(session.user.id, totalComposeCredits);
     if (!composeCreditCheck.ok) {
@@ -248,21 +263,82 @@ export async function POST(request: NextRequest) {
       startedAt: new Date(),
     });
 
+    processComposeGeneration({
+      taskId,
+      dramaId,
+      userId: session.user.id,
+      useAsr: Boolean(useAsr),
+      uploadDir,
+      dramaBgmUrl: drama.bgmUrl,
+      dramaGenre: drama.genre,
+      allEpisodes,
+      totalComposeCredits,
+    }).catch(console.error);
+
+    return NextResponse.json({
+      taskId,
+      message: `正在合成 ${allEpisodes.length} 集视频，请稍候...`,
+      episodeCount: allEpisodes.length,
+    });
+  } catch (error) {
+    console.error("Video composition failed:", error);
+    if (taskId && dramaId) {
+      await failGenerationTask(
+        taskId,
+        dramaId,
+        error instanceof Error ? error.message : "未知错误"
+      );
+    }
+    return NextResponse.json(
+      { error: `视频合成失败: ${error instanceof Error ? error.message : "未知错误"}` },
+      { status: 500 }
+    );
+  }
+}
+
+type ComposeGenerationParams = {
+  taskId: string;
+  dramaId: string;
+  userId: string;
+  useAsr: boolean;
+  uploadDir: string;
+  dramaBgmUrl: string | null;
+  dramaGenre: string | null;
+  allEpisodes: Episode[];
+  totalComposeCredits: number;
+};
+
+async function processComposeGeneration({
+  taskId,
+  dramaId,
+  userId,
+  useAsr,
+  uploadDir,
+  dramaBgmUrl,
+  dramaGenre,
+  allEpisodes,
+  totalComposeCredits,
+}: ComposeGenerationParams) {
+  try {
     const videoPaths: string[] = [];
 
-    // Resolve BGM for all episodes
-    const dramaBgmUrl = drama.bgmUrl;
     let resolvedBgmPath: string | null = null;
     if (dramaBgmUrl) {
       const tryPath = path.isAbsolute(dramaBgmUrl) ? dramaBgmUrl : path.join(uploadDir, dramaBgmUrl);
       try {
         await fs.access(tryPath);
         resolvedBgmPath = tryPath;
-      } catch { /* BGM file not found */ }
+      } catch {
+        // ignore missing bgm
+      }
     }
-    const dramaBgmVolume = dramaBgmUrl ? (BGM_VOLUME_MAP[inferBgmPreset(drama.genre)] ?? 0.15) : 0.15;
+    const dramaBgmVolume = dramaBgmUrl ? (BGM_VOLUME_MAP[inferBgmPreset(dramaGenre)] ?? 0.15) : 0.15;
 
     for (const episode of allEpisodes) {
+      if (await isGenerationTaskCancelled(taskId)) {
+        return;
+      }
+
       try {
         const outputPath = path.join(
           uploadDir,
@@ -272,7 +348,6 @@ export async function POST(request: NextRequest) {
         );
 
         if (episode.shotData && Array.isArray(episode.shotData)) {
-          // V2 shot-based composition
           const shots = episode.shotData as Shot[];
           const shotAudios = await reconstructShotAudios(
             shots,
@@ -281,22 +356,20 @@ export async function POST(request: NextRequest) {
             episode.episodeNumber
           );
 
-          // Build shot images map from disk
           const shotImages = new Map<number, string>();
-          const shotVideos = new Map<number, string>(); // AI generated videos
+          const shotVideos = new Map<number, string>();
           const shotImageDir = path.join(uploadDir, "images", dramaId, `episode-${episode.episodeNumber}`);
+
           for (const shot of shots) {
-            // Check for AI video
             if (shot.aiVideoUrl) {
               try {
                 await fs.access(shot.aiVideoUrl);
                 shotVideos.set(shot.shotNumber, shot.aiVideoUrl);
               } catch {
-                // AI video file doesn't exist
+                // ignore missing ai video file
               }
             }
 
-            // Still need image for fallback
             const imgPath = path.join(shotImageDir, `shot-${shot.shotNumber}.jpg`);
             try {
               await fs.access(imgPath);
@@ -306,11 +379,12 @@ export async function POST(request: NextRequest) {
               try {
                 await fs.access(imgPathPng);
                 shotImages.set(shot.shotNumber, imgPathPng);
-              } catch { /* no shot image */ }
+              } catch {
+                // ignore missing shot image
+              }
             }
           }
 
-          // Generate subtitle if not done
           let subtitlePath = episode.subtitleUrl;
           if (!subtitlePath) {
             if (useAsr && isAsrConfigured()) {
@@ -350,7 +424,6 @@ export async function POST(request: NextRequest) {
             }
           );
         } else if (episode.imageUrl && episode.voiceoverUrl) {
-          // V1 fallback
           await composeVideo({
             imagePath: episode.imageUrl,
             audioPath: episode.voiceoverUrl,
@@ -373,27 +446,34 @@ export async function POST(request: NextRequest) {
       } catch (err) {
         console.error(`Failed to compose episode ${episode.episodeNumber}:`, err);
       }
+
+      await updateGenerationTaskProgress(taskId, {
+        completedCount: videoPaths.length,
+        episodeCount: allEpisodes.length,
+      });
     }
 
     if (videoPaths.length === 0) {
       throw new Error("未生成任何可用视频");
     }
 
-    // Merge all videos
-    let mergedUrl: string | null = null;
     const mergedPath = path.join(uploadDir, "videos", `${dramaId}`, "complete.mp4");
     const localMergedPath = await mergeVideos(videoPaths, mergedPath);
     const mergedCosKey = `${dramaId}/videos/complete.mp4`;
-    mergedUrl = toDbPath(await uploadFileToCos(localMergedPath, mergedCosKey));
+    const mergedUrl = toDbPath(await uploadFileToCos(localMergedPath, mergedCosKey));
 
-    // Calculate total duration
     const totalDuration = allEpisodes.reduce(
       (sum, ep) => sum + (ep.duration || 0),
       0
     );
 
-    // Deduct credits
-    await requireCreditDeduction(session.user.id, "compose", totalComposeCredits, dramaId, `合成视频 - 共${allEpisodes.length}集`);
+    await requireCreditDeduction(
+      userId,
+      "compose",
+      totalComposeCredits,
+      dramaId,
+      `合成视频 - 共${allEpisodes.length}集`
+    );
 
     await db
       .update(dramas)
@@ -404,25 +484,17 @@ export async function POST(request: NextRequest) {
       })
       .where(eq(dramas.id, dramaId));
 
-    await completeGenerationTask(taskId, { videoCount: videoPaths.length, mergedUrl });
-
-    return NextResponse.json({
-      taskId,
+    await completeGenerationTask(taskId, {
+      completedCount: videoPaths.length,
+      episodeCount: allEpisodes.length,
       videoCount: videoPaths.length,
       mergedUrl,
     });
   } catch (error) {
-    console.error("Video composition failed:", error);
-    if (taskId && dramaId) {
-      await failGenerationTask(
-        taskId,
-        dramaId,
-        error instanceof Error ? error.message : "未知错误"
-      );
-    }
-    return NextResponse.json(
-      { error: `视频合成失败: ${error instanceof Error ? error.message : "未知错误"}` },
-      { status: 500 }
+    await failGenerationTask(
+      taskId,
+      dramaId,
+      error instanceof Error ? error.message : "未知错误"
     );
   }
 }

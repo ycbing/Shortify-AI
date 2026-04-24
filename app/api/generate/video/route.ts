@@ -17,14 +17,19 @@ import {
   aiVideoCosKey,
   videoCosKey,
 } from "@/lib/ai/cos-storage";
-import type { Shot, ShotAudio } from "@/types/drama";
+import type { Shot } from "@/types/drama";
 import path from "path";
 import fs from "fs/promises";
 import { checkCredits, CREDIT_COSTS, requireCreditDeduction } from "@/lib/credits";
 import { execSync, exec } from "child_process";
 import { promisify } from "util";
 import { getOwnedDrama } from "@/lib/dramas";
-import { completeGenerationTask, failGenerationTask } from "@/lib/generation";
+import {
+  completeGenerationTask,
+  failGenerationTask,
+  getActiveGenerationTask,
+  isGenerationTaskCancelled,
+} from "@/lib/generation";
 
 const execAsync = promisify(exec);
 
@@ -91,6 +96,16 @@ export async function POST(request: NextRequest) {
         message: "所有镜头已有 AI 视频，无需生成",
         episodeCount: 0,
         shotCount: 0,
+      });
+    }
+
+    const activeTask = await getActiveGenerationTask(dramaId, "video");
+    if (activeTask) {
+      return NextResponse.json({
+        taskId: activeTask.id,
+        message: "已有 AI 视频任务正在进行，已为你恢复到当前任务",
+        episodeCount: episodesNeedingVideo.length,
+        shotCount: totalShotsNeeded,
       });
     }
 
@@ -310,6 +325,10 @@ async function processVideos(
     let totalCreditsUsed = 0;
 
     for (const episode of episodesList) {
+      if (await isGenerationTaskCancelled(taskId)) {
+        return;
+      }
+
       const epNum = episode.episodeNumber;
       const shots = (episode.shotData as Shot[]).slice(); // shallow clone
 
@@ -329,6 +348,10 @@ async function processVideos(
       let shotsSkipped = 0;
 
       for (const shot of shots) {
+        if (await isGenerationTaskCancelled(taskId)) {
+          return;
+        }
+
         // Skip shots that already have aiVideoUrl
         if (shot.aiVideoUrl) {
           shotsSkipped++;
@@ -369,7 +392,6 @@ async function processVideos(
 
         // 7. Mix voiceover audio into the AI video immediately (one encode pass)
         const voiceoverPath = path.join(uploadDir, "voiceovers", dramaId, `episode-${epNum}`, `shot-${shot.shotNumber}.mp3`);
-        let mixedVideoPath = localVideoPath;
         try {
           await fs.access(voiceoverPath);
           const mixedPath = path.join(localVideoDir, `shot-${shot.shotNumber}-mixed.mp4`);

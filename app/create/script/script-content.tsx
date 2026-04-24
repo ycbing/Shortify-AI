@@ -5,8 +5,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { StepIndicator } from "@/components/create/step-indicator";
 import { ScriptEditor } from "@/components/drama/script-editor";
-import { Loader2, ArrowRight, ArrowLeft, Sparkles, Users, Film } from "lucide-react";
-import type { GeneratedEpisode, GeneratedScriptV2, Shot, Character, ShotAudio } from "@/types/drama";
+import { Loader2, ArrowRight, ArrowLeft, Sparkles, Users, Film, Square } from "lucide-react";
+import type { GeneratedEpisode, GeneratedScriptV2, Shot, Character } from "@/types/drama";
 import { isScriptV2, VOICE_OPTIONS } from "@/types/drama";
 import Link from "next/link";
 import { useTaskPolling } from "@/lib/hooks/use-task-polling";
@@ -40,10 +40,50 @@ export default function ScriptPageContent() {
   const [title, setTitle] = useState("");
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
-  const [generateStartTime, setGenerateStartTime] = useState<number>(0);
   const [error, setError] = useState("");
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [taskProgressLabel, setTaskProgressLabel] = useState("");
+
+  const handleGenerate = useCallback(async () => {
+    if (!dramaId) return;
+    setGenerating(true);
+    setError("");
+
+    try {
+      const res = await fetch("/api/generate/script", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dramaId }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error || "生成失败");
+        setGenerating(false);
+        return;
+      }
+
+      if (data.taskId && !data.script) {
+        setActiveTaskId(data.taskId);
+        setTaskProgressLabel("");
+        return;
+      }
+
+      setTitle(data.script.title);
+
+      if (isScriptV2(data.script)) {
+        setScriptV2(data.script);
+        setCharacters(data.script.characters);
+      }
+
+      setEpisodes(data.script.episodes);
+      setGenerating(false);
+    } catch {
+      setError("剧本生成失败，请稍后重试");
+      setGenerating(false);
+    }
+  }, [dramaId]);
 
   const fetchScript = useCallback(async () => {
     if (!dramaId) return;
@@ -147,7 +187,7 @@ export default function ScriptPageContent() {
     // Auto-generate script
     setLoading(false);
     handleGenerate();
-  }, [dramaId]);
+  }, [dramaId, handleGenerate]);
 
   const { task: activeTask, startPolling } = useTaskPolling(activeTaskId, {
     autoStart: false,
@@ -170,52 +210,32 @@ export default function ScriptPageContent() {
       router.push("/create");
       return;
     }
-    fetchScript();
-  }, [dramaId]);
+    queueMicrotask(() => {
+      void fetchScript();
+    });
+  }, [dramaId, fetchScript, router]);
 
   useEffect(() => {
     if (!activeTaskId) return;
     void startPolling();
   }, [activeTaskId, startPolling]);
 
-  useEffect(() => {
-    if (!activeTask?.progress) return;
-    setGenerating(true);
-    setTaskProgressLabel(activeTask.progress.label || "");
-  }, [activeTask]);
+  const progressLabel = activeTask?.progress?.label || taskProgressLabel;
 
-  const handleGenerate = async () => {
-    if (!dramaId) return;
-    setGenerating(true);
-    setGenerateStartTime(Date.now());
-    setError("");
-
+  const handleCancelTask = async () => {
+    if (!activeTaskId) return;
     try {
-      const res = await fetch("/api/generate/script", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dramaId }),
-      });
-
-      const data = await res.json();
-
+      const res = await fetch(`/api/tasks/${activeTaskId}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(data.error || "生成失败");
+        setError(data.error || "取消任务失败");
         return;
       }
-
-      setTitle(data.script.title);
-
-      if (isScriptV2(data.script)) {
-        setScriptV2(data.script);
-        setCharacters(data.script.characters);
-      }
-
-      setEpisodes(data.script.episodes);
-    } catch {
-      setError("剧本生成失败，请稍后重试");
-    } finally {
       setGenerating(false);
+      setActiveTaskId(null);
+      setTaskProgressLabel("");
+    } catch {
+      setError("取消任务失败");
     }
   };
 
@@ -288,7 +308,7 @@ export default function ScriptPageContent() {
               <TypingDots />
             </p>
             <p className="text-sm text-muted-foreground mb-4">
-              {taskProgressLabel || "通常需要 10-30 秒，请耐心等待"}
+              {progressLabel || "通常需要 10-30 秒，请耐心等待"}
             </p>
             <div className="flex items-center gap-4 text-xs text-muted-foreground">
               <div className="flex items-center gap-1.5">
@@ -304,6 +324,16 @@ export default function ScriptPageContent() {
                 <span>打磨细节</span>
               </div>
             </div>
+            {activeTaskId && (
+              <Button
+                variant="outline"
+                onClick={handleCancelTask}
+                className="mt-6 min-h-[40px]"
+              >
+                <Square className="h-4 w-4 mr-2" />
+                取消任务
+              </Button>
+            )}
           </div>
         ) : scriptV2 ? (
           <>
@@ -420,7 +450,7 @@ export default function ScriptPageContent() {
                             <span className="text-xs sm:text-sm font-medium text-blue-400">
                               {shot.character}:
                             </span>
-                            <span className="text-xs sm:text-sm ml-1">"{shot.line}"</span>
+                            <span className="text-xs sm:text-sm ml-1">&quot;{shot.line}&quot;</span>
                           </div>
                         )}
                         {shot.type === "narration" && shot.subtitle && (

@@ -14,12 +14,15 @@ export async function GET(request: NextRequest) {
     const type = searchParams.get("type");
     const status = searchParams.get("status");
     const latest = searchParams.get("latest") === "1";
+    const limitValue = searchParams.get("limit");
+    const limit = limitValue ? Number.parseInt(limitValue, 10) : undefined;
 
     const tasks = await listTasksForUser(session.user.id, {
       dramaId: dramaId || undefined,
       type: type || undefined,
       status: status || undefined,
       latest,
+      limit: limit && limit > 0 ? limit : undefined,
     });
 
     return NextResponse.json({ tasks });
