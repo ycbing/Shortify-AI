@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { dramas, episodes, generationTasks, type Episode } from "@/lib/db/schema";
+import { dramas, episodes, type Episode } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
-import { v4 as uuidv4 } from "uuid";
 import { generateImage } from "@/lib/ai/image-generator";
 import { uploadFileToCos, imageCosKey } from "@/lib/ai/cos-storage";
 import path from "path";
@@ -11,8 +10,10 @@ import fs from "fs/promises";
 import type { Shot, Character } from "@/types/drama";
 import { checkCredits, CREDIT_COSTS, requireCreditDeduction } from "@/lib/credits";
 import { getOwnedDrama } from "@/lib/dramas";
+import { updateDramaStatus } from "@/lib/drama-status";
 import {
   completeGenerationTask,
+  createOrReuseGenerationTask,
   failGenerationTask,
   getActiveGenerationTask,
   isGenerationTaskCancelled,
@@ -173,15 +174,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    taskId = uuidv4();
-    await db.insert(generationTasks).values({
-      id: taskId,
+    const taskResult = await createOrReuseGenerationTask({
       dramaId,
       type: "storyboard",
-      status: "processing",
       inputData: { episodeCount: allEpisodes.length },
-      startedAt: new Date(),
     });
+    taskId = taskResult.taskId;
 
     processStoryboardGeneration({
       taskId,
@@ -307,10 +305,7 @@ async function processStoryboardGeneration({
       `生成分镜图片 - 共${allEpisodes.length}集`
     );
 
-    await db
-      .update(dramas)
-      .set({ status: "storyboard_ready", updatedAt: new Date() })
-      .where(eq(dramas.id, dramaId));
+    await updateDramaStatus(dramaId, "storyboard_ready");
 
     await completeGenerationTask(taskId, {
       completedCount: results.length,

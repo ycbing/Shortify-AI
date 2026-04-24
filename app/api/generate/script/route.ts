@@ -1,16 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { dramas, episodes, generationTasks } from "@/lib/db/schema";
+import { dramas, episodes } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { v4 as uuidv4 } from "uuid";
 import { generateScript, extractNarrationFromShots } from "@/lib/ai/script-generator";
 import { isScriptV2 } from "@/types/drama";
 import type { DramaGenreType, DramaStyleType, GeneratedScriptV2 } from "@/types/drama";
 import { checkCredits, CREDIT_COSTS, requireCreditDeduction } from "@/lib/credits";
 import { getOwnedDrama } from "@/lib/dramas";
+import { updateDramaStatus } from "@/lib/drama-status";
 import {
   completeGenerationTask,
+  createOrReuseGenerationTask,
   failGenerationTask,
   getActiveGenerationTask,
   isGenerationTaskCancelled,
@@ -55,21 +56,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create generation task
-    taskId = uuidv4();
-    await db.insert(generationTasks).values({
-      id: taskId,
+    const taskResult = await createOrReuseGenerationTask({
       dramaId,
       type: "script",
-      status: "processing",
       inputData: {
         theme: drama.theme,
         genre: drama.genre,
         style: drama.style,
         episodeCount: drama.episodeCount,
       },
-      startedAt: new Date(),
     });
+    taskId = taskResult.taskId;
 
     // Generate script (always V2 now)
     const script = await generateScript(
@@ -92,7 +89,6 @@ export async function POST(request: NextRequest) {
     // Update drama title and characters (V2)
     const updateData: Record<string, unknown> = {
       title: script.title,
-      status: "script_ready",
       updatedAt: new Date(),
     };
 
@@ -104,6 +100,7 @@ export async function POST(request: NextRequest) {
       .update(dramas)
       .set(updateData)
       .where(eq(dramas.id, dramaId));
+    await updateDramaStatus(dramaId, "script_ready");
 
     // Create episodes (V2 format)
     for (const ep of script.episodes) {

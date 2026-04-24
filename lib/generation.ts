@@ -1,6 +1,8 @@
+import { randomUUID } from "crypto";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { dramas, generationTasks } from "@/lib/db/schema";
+import { inferDramaStatus, updateDramaStatus } from "@/lib/drama-status";
 
 export async function getActiveGenerationTask(
   dramaId: string,
@@ -47,6 +49,54 @@ export async function completeGenerationTask(
     .where(eq(generationTasks.id, taskId));
 }
 
+type CreateGenerationTaskParams = {
+  dramaId: string;
+  type: string;
+  inputData?: Record<string, unknown>;
+  processingDramaStatus?: string;
+};
+
+export async function createOrReuseGenerationTask({
+  dramaId,
+  type,
+  inputData = {},
+  processingDramaStatus = "generating",
+}: CreateGenerationTaskParams) {
+  const activeTask = await getActiveGenerationTask(dramaId, type);
+  if (activeTask) {
+    return {
+      taskId: activeTask.id,
+      reused: true,
+    };
+  }
+
+  const [drama] = await db
+    .select({ status: dramas.status })
+    .from(dramas)
+    .where(eq(dramas.id, dramaId))
+    .limit(1);
+
+  const taskId = randomUUID();
+  await db.insert(generationTasks).values({
+    id: taskId,
+    dramaId,
+    type,
+    status: "processing",
+    inputData: {
+      ...inputData,
+      previousDramaStatus: drama?.status || null,
+    },
+    startedAt: new Date(),
+  });
+
+  await updateDramaStatus(dramaId, processingDramaStatus);
+
+  return {
+    taskId,
+    reused: false,
+  };
+}
+
 export async function updateGenerationTaskProgress(
   taskId: string,
   outputData: Record<string, unknown>
@@ -88,6 +138,27 @@ export async function cancelGenerationTask(
   dramaId: string,
   errorMessage = "任务已取消"
 ) {
+  const [task] = await db
+    .select({ inputData: generationTasks.inputData })
+    .from(generationTasks)
+    .where(eq(generationTasks.id, taskId))
+    .limit(1);
+
+  const previousDramaStatus =
+    task?.inputData &&
+    typeof task.inputData === "object" &&
+    !Array.isArray(task.inputData) &&
+    "previousDramaStatus" in task.inputData &&
+    typeof (task.inputData as Record<string, unknown>).previousDramaStatus === "string"
+      ? ((task.inputData as Record<string, unknown>).previousDramaStatus as string)
+      : null;
+
+  const inferredStatus = await inferDramaStatus(dramaId);
+  const nextDramaStatus =
+    previousDramaStatus && previousDramaStatus !== "generating" && previousDramaStatus !== "error"
+      ? previousDramaStatus
+      : inferredStatus;
+
   await db
     .update(generationTasks)
     .set({
@@ -97,11 +168,5 @@ export async function cancelGenerationTask(
     })
     .where(eq(generationTasks.id, taskId));
 
-  await db
-    .update(dramas)
-    .set({
-      status: "error",
-      updatedAt: new Date(),
-    })
-    .where(eq(dramas.id, dramaId));
+  await updateDramaStatus(dramaId, nextDramaStatus);
 }

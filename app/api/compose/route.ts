@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { dramas, episodes, generationTasks, type Episode } from "@/lib/db/schema";
+import { dramas, episodes, type Episode } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
-import { v4 as uuidv4 } from "uuid";
 import { composeVideo, composeEpisodeFromShots, mergeVideos } from "@/lib/ai/video-composer";
 import { generateSubtitles, generateSubtitlesWithASR } from "@/lib/ai/subtitle-generator";
 import { isAsrConfigured } from "@/lib/ai/asr-client";
@@ -14,7 +13,9 @@ import path from "path";
 import fs from "fs/promises";
 import { checkCredits, CREDIT_COSTS, requireCreditDeduction } from "@/lib/credits";
 import { getOwnedDrama } from "@/lib/dramas";
+import { updateDramaStatus } from "@/lib/drama-status";
 import {
+  createOrReuseGenerationTask,
   getActiveGenerationTask,
   isGenerationTaskCancelled,
   completeGenerationTask,
@@ -253,15 +254,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    taskId = uuidv4();
-    await db.insert(generationTasks).values({
-      id: taskId,
+    const taskResult = await createOrReuseGenerationTask({
       dramaId,
       type: "compose",
-      status: "processing",
       inputData: { episodeCount: allEpisodes.length },
-      startedAt: new Date(),
     });
+    taskId = taskResult.taskId;
 
     processComposeGeneration({
       taskId,
@@ -478,11 +476,10 @@ async function processComposeGeneration({
     await db
       .update(dramas)
       .set({
-        status: "completed",
         totalDuration,
-        updatedAt: new Date(),
       })
       .where(eq(dramas.id, dramaId));
+    await updateDramaStatus(dramaId, "completed");
 
     await completeGenerationTask(taskId, {
       completedCount: videoPaths.length,

@@ -26,6 +26,7 @@ import {
   QrCode,
 } from "lucide-react";
 import Link from "next/link";
+import { DRAMA_STATUS_META, getDramaEditorPath } from "@/lib/drama-status";
 
 interface DramaData {
   id: string;
@@ -119,8 +120,10 @@ export default function ViewDramaPage() {
       router.push("/dashboard");
       return;
     }
-    fetchDrama();
-  }, [dramaId]);
+    queueMicrotask(() => {
+      void fetchDrama();
+    });
+  }, [dramaId, fetchDrama, router]);
 
   const handleShare = async () => {
     if (!dramaId) return;
@@ -189,29 +192,8 @@ export default function ViewDramaPage() {
     );
   }
 
-  const statusLabels: Record<string, string> = {
-    draft: "草稿",
-    generating: "生成中",
-    script_ready: "剧本就绪",
-    storyboard_ready: "分镜就绪",
-    voiceover_ready: "配音就绪",
-    completed: "已完成",
-    error: "生成失败",
-  };
-
   const getEditorUrl = () => {
-    switch (drama.status) {
-      case "draft":
-      case "generating":
-      case "script_ready":
-        return `/create/script?dramaId=${dramaId}`;
-      case "storyboard_ready":
-        return `/create/storyboard?dramaId=${dramaId}`;
-      case "voiceover_ready":
-      case "completed":
-      default:
-        return `/create/preview?dramaId=${dramaId}`;
-    }
+    return getDramaEditorPath(dramaId, episodes, drama.status);
   };
 
   return (
@@ -253,7 +235,7 @@ export default function ViewDramaPage() {
         <div className="mb-6">
           <div className="flex items-center gap-3 mb-2">
             <h1 className="text-2xl font-bold">{drama.title}</h1>
-            <Badge variant="outline">{statusLabels[drama.status] || drama.status}</Badge>
+            <Badge variant="outline">{DRAMA_STATUS_META[drama.status]?.label || drama.status}</Badge>
             {drama.shareCount != null && drama.shareCount > 0 && (
               <span className="text-xs text-muted-foreground">
                 {drama.shareCount} 次分享

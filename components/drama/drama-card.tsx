@@ -5,66 +5,25 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import type { DramaWithEpisodes } from "@/types/drama";
 import { Check } from "lucide-react";
-
-const STATUS_MAP: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
-  draft: { label: "草稿", variant: "outline" },
-  generating: { label: "生成中", variant: "default" },
-  script_ready: { label: "剧本就绪", variant: "secondary" },
-  storyboard_ready: { label: "分镜就绪", variant: "secondary" },
-  voiceover_ready: { label: "配音就绪", variant: "secondary" },
-  completed: { label: "已完成", variant: "default" },
-  error: { label: "生成失败", variant: "destructive" },
-};
-
-/** Progress steps for the drama creation pipeline */
-const PROGRESS_STEPS = [
-  { key: "script", label: "剧本" },
-  { key: "storyboard", label: "分镜" },
-  { key: "voiceover", label: "配音" },
-  { key: "video", label: "视频" },
-];
-
-function getCompletedSteps(status: string, episodes: DramaWithEpisodes["episodes"]): Set<string> {
-  const completed = new Set<string>();
-  if (!episodes || episodes.length === 0) return completed;
-
-  // Check based on status and episode data
-  if (status === "draft") return completed;
-
-  // Script is ready if we have episodes
-  if (episodes.length > 0) {
-    completed.add("script");
-  }
-
-  // Storyboard is ready if episodes have images
-  if (episodes.some((ep) => ep.imageUrl)) {
-    completed.add("storyboard");
-  }
-
-  // Voiceover is ready if episodes have voiceovers
-  if (episodes.some((ep) => ep.voiceoverUrl)) {
-    completed.add("voiceover");
-  }
-
-  // Video is ready if episodes have videos
-  if (episodes.some((ep) => ep.videoUrl)) {
-    completed.add("video");
-  }
-
-  return completed;
-}
+import {
+  getDramaEditorPath,
+  DRAMA_PROGRESS_STEPS,
+  DRAMA_STATUS_META,
+  getCompletedDramaSteps,
+} from "@/lib/drama-status";
 
 interface DramaCardProps {
   drama: DramaWithEpisodes;
 }
 
 export function DramaCard({ drama }: DramaCardProps) {
-  const status = STATUS_MAP[drama.status] || STATUS_MAP.draft;
+  const status = DRAMA_STATUS_META[drama.status] || DRAMA_STATUS_META.draft;
   const dramaEpisodes = drama.episodes || [];
-  const completedSteps = getCompletedSteps(drama.status, dramaEpisodes);
+  const completedSteps = getCompletedDramaSteps(drama.status, dramaEpisodes);
+  const editorUrl = getDramaEditorPath(drama.id, dramaEpisodes, drama.status);
 
   return (
-    <Link href={`/view/${drama.id}`}>
+    <Link href={editorUrl}>
       <Card className="group overflow-hidden border-border/50 bg-card/50 hover:border-emerald-500/50 hover:bg-card/80 transition-all duration-300 cursor-pointer">
         {/* Cover */}
         <div className="relative aspect-video bg-muted overflow-hidden">
@@ -98,7 +57,7 @@ export function DramaCard({ drama }: DramaCardProps) {
           {/* Progress steps */}
           {dramaEpisodes.length > 0 && drama.status !== "draft" && (
             <div className="flex items-center gap-1 pt-2 border-t border-border/30">
-              {PROGRESS_STEPS.map((step, idx) => {
+              {DRAMA_PROGRESS_STEPS.map((step, idx) => {
                 const isCompleted = completedSteps.has(step.key);
                 return (
                   <div key={step.key} className="flex items-center gap-1">
@@ -116,7 +75,7 @@ export function DramaCard({ drama }: DramaCardProps) {
                       )}
                       {step.label}
                     </div>
-                    {idx < PROGRESS_STEPS.length - 1 && (
+                    {idx < DRAMA_PROGRESS_STEPS.length - 1 && (
                       <span className="text-zinc-600 text-[8px]">→</span>
                     )}
                   </div>

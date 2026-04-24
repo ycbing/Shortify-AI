@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { dramas, episodes, generationTasks } from "@/lib/db/schema";
+import { episodes } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
-import { v4 as uuidv4 } from "uuid";
 import {
   submitVideoGeneration,
   waitForVideoCompletion,
@@ -26,6 +25,7 @@ import { promisify } from "util";
 import { getOwnedDrama } from "@/lib/dramas";
 import {
   completeGenerationTask,
+  createOrReuseGenerationTask,
   failGenerationTask,
   getActiveGenerationTask,
   isGenerationTaskCancelled,
@@ -123,22 +123,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Update drama status
-    await db
-      .update(dramas)
-      .set({ status: "generating", updatedAt: new Date() })
-      .where(eq(dramas.id, dramaId));
-
-    // Create task record
-    taskId = uuidv4();
-    await db.insert(generationTasks).values({
-      id: taskId,
+    const taskResult = await createOrReuseGenerationTask({
       dramaId,
       type: "video",
-      status: "processing",
       inputData: { episodeCount: episodesNeedingVideo.length, shotCount: totalShotsNeeded },
-      startedAt: new Date(),
     });
+    taskId = taskResult.taskId;
 
     // Process in background
     processVideos(dramaId, episodesNeedingVideo, drama.style || "realistic", taskId, session.user.id).catch(
@@ -491,10 +481,7 @@ async function processVideos(
       throw new Error("AI 视频生成未产出可用结果");
     }
 
-    await db
-      .update(dramas)
-      .set({ status: "completed", updatedAt: new Date() })
-      .where(eq(dramas.id, dramaId));
+    await updateDramaStatus(dramaId, "completed");
 
     await completeGenerationTask(taskId, {
       results,

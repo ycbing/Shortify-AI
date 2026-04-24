@@ -8,6 +8,12 @@ import { Button } from "@/components/ui/button";
 import { Plus, Loader2, Trash2, Copy, Pencil, Film, Check, Settings } from "lucide-react";
 import type { DramaWithEpisodes } from "@/types/drama";
 import {
+  DRAMA_PROGRESS_STEPS,
+  DRAMA_STATUS_META,
+  getDramaEditorPath,
+  getCompletedDramaSteps,
+} from "@/lib/drama-status";
+import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -47,9 +53,11 @@ export default function DashboardPage() {
       return;
     }
     if (status === "authenticated") {
-      fetchDramas();
+      queueMicrotask(() => {
+        void fetchDramas();
+      });
     }
-  }, [status, filter]);
+  }, [fetchDramas, router, status]);
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
@@ -248,36 +256,6 @@ export default function DashboardPage() {
 
 // --- Drama card with management actions ---
 
-const STATUS_MAP: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
-  draft: { label: "草稿", variant: "outline" },
-  generating: { label: "生成中", variant: "default" },
-  script_ready: { label: "剧本就绪", variant: "secondary" },
-  storyboard_ready: { label: "分镜就绪", variant: "secondary" },
-  voiceover_ready: { label: "配音就绪", variant: "secondary" },
-  completed: { label: "已完成", variant: "default" },
-  error: { label: "生成失败", variant: "destructive" },
-};
-
-const PROGRESS_STEPS = [
-  { key: "script", label: "剧本" },
-  { key: "storyboard", label: "分镜" },
-  { key: "voiceover", label: "配音" },
-  { key: "video", label: "视频" },
-];
-
-function getCompletedSteps(status: string, episodes: DramaWithEpisodes["episodes"]): Set<string> {
-  const completed = new Set<string>();
-  if (!episodes || episodes.length === 0) return completed;
-  if (status === "draft") return completed;
-
-  if (episodes.length > 0) completed.add("script");
-  if (episodes.some((ep) => ep.imageUrl)) completed.add("storyboard");
-  if (episodes.some((ep) => ep.voiceoverUrl)) completed.add("voiceover");
-  if (episodes.some((ep) => ep.videoUrl)) completed.add("video");
-
-  return completed;
-}
-
 interface DramaCardProps {
   drama: DramaWithEpisodes;
   onDelete: () => void;
@@ -286,9 +264,9 @@ interface DramaCardProps {
 }
 
 function DramaCardWithActions({ drama, onDelete, onCopy, copying }: DramaCardProps) {
-  const status = STATUS_MAP[drama.status] || STATUS_MAP.draft;
+  const status = DRAMA_STATUS_META[drama.status] || DRAMA_STATUS_META.draft;
   const dramaEpisodes = drama.episodes || [];
-  const completedSteps = getCompletedSteps(drama.status, dramaEpisodes);
+  const completedSteps = getCompletedDramaSteps(drama.status, dramaEpisodes);
 
   /** Convert storage path to public-accessible URL */
   const toImgUrl = (p: string | null) => {
@@ -310,30 +288,16 @@ function DramaCardWithActions({ drama, onDelete, onCopy, copying }: DramaCardPro
   };
 
   const coverSrc = toImgUrl(drama.coverUrl) || toImgUrl(dramaEpisodes[0]?.imageUrl || null);
+  const editorUrl = getDramaEditorPath(drama.id, dramaEpisodes, drama.status);
 
   // Determine the best editor page to link to based on status
-  const getEditorUrl = () => {
-    switch (drama.status) {
-      case "draft":
-      case "generating":
-      case "script_ready":
-        return `/create/script?dramaId=${drama.id}`;
-      case "storyboard_ready":
-        return `/create/storyboard?dramaId=${drama.id}`;
-      case "voiceover_ready":
-      case "completed":
-      default:
-        return `/create/preview?dramaId=${drama.id}`;
-    }
-  };
-
   const getViewUrl = () => `/view/${drama.id}`;
   const dramaCompleted = drama.status === "completed";
 
   return (
     <div className="group border border-border/50 rounded-xl overflow-hidden bg-card/50 hover:border-emerald-500/50 hover:bg-card/80 transition-all duration-300">
       {/* Cover — clickable */}
-      <Link href={dramaCompleted ? getViewUrl() : getEditorUrl()} className="block">
+      <Link href={dramaCompleted ? getViewUrl() : editorUrl} className="block">
         <div className="relative aspect-video bg-muted overflow-hidden">
           {coverSrc ? (
             <img
@@ -366,7 +330,7 @@ function DramaCardWithActions({ drama, onDelete, onCopy, copying }: DramaCardPro
         {/* Progress steps */}
         {dramaEpisodes.length > 0 && drama.status !== "draft" && (
           <div className="flex items-center gap-1 mb-3 pb-3 border-b border-border/30">
-            {PROGRESS_STEPS.map((step, idx) => {
+              {DRAMA_PROGRESS_STEPS.map((step, idx) => {
               const isCompleted = completedSteps.has(step.key);
               return (
                 <div key={step.key} className="flex items-center gap-1">
@@ -384,7 +348,7 @@ function DramaCardWithActions({ drama, onDelete, onCopy, copying }: DramaCardPro
                     )}
                     {step.label}
                   </div>
-                  {idx < PROGRESS_STEPS.length - 1 && (
+                  {idx < DRAMA_PROGRESS_STEPS.length - 1 && (
                     <span className="text-zinc-600 text-[8px]">→</span>
                   )}
                 </div>
