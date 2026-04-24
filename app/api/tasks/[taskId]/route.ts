@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { buildTaskProgress, getTaskForUser } from "@/lib/services/tasks";
+import { getTaskForUser, getTaskWithProgressForUser } from "@/lib/services/tasks";
 import { cancelGenerationTask } from "@/lib/generation";
 
 export async function GET(
@@ -15,20 +15,13 @@ export async function GET(
 
     const { taskId } = await params;
 
-    const task = await getTaskForUser(taskId, session.user.id);
+    const task = await getTaskWithProgressForUser(taskId, session.user.id);
 
     if (!task) {
       return NextResponse.json({ error: "任务不存在" }, { status: 404 });
     }
 
-    const progress = await buildTaskProgress(task);
-
-    return NextResponse.json({
-      task: {
-        ...task,
-        progress,
-      },
-    });
+    return NextResponse.json({ task });
   } catch (error) {
     console.error("Failed to fetch task:", error);
     return NextResponse.json({ error: "获取任务详情失败" }, { status: 500 });

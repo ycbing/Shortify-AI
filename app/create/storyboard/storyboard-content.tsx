@@ -93,11 +93,11 @@ export default function StoryboardPageContent() {
 
   const { task: activeTask, startPolling } = useTaskPolling(activeTaskId, {
     autoStart: false,
-    onCompleted: async () => {
+    onCompleted: async (task) => {
       setGenerating(false);
       setGeneratingIndex(-1);
       setActiveTaskId(null);
-      setTaskProgressLabel("");
+      setTaskProgressLabel(task.presentation?.summary || "");
       await fetchEpisodes();
       toast.success("分镜生成完成");
     },
@@ -105,9 +105,9 @@ export default function StoryboardPageContent() {
       setGenerating(false);
       setGeneratingIndex(-1);
       setActiveTaskId(null);
-      setTaskProgressLabel("");
-      setError(task.errorMessage || "分镜生成失败");
-      toast.error(task.errorMessage || "分镜生成失败");
+      setTaskProgressLabel(task.presentation?.summary || "");
+      setError(task.presentation?.failureTitle || task.errorMessage || "分镜生成失败");
+      toast.error(task.presentation?.failureTitle || task.errorMessage || "分镜生成失败");
     },
   });
 

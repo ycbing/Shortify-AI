@@ -1,6 +1,7 @@
 import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { dramas, episodes, generationTasks } from "@/lib/db/schema";
+import { buildTaskPresentation } from "@/lib/task-presentation";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -20,6 +21,9 @@ export type TaskProgress = {
   episodeCompleted?: number;
   episodeTotal?: number;
 };
+
+export type TaskListItem = Awaited<ReturnType<typeof listTasksForUser>>[number];
+export type TaskDetail = Awaited<ReturnType<typeof getTaskWithProgressForUser>>;
 
 function asRecord(value: unknown): JsonRecord {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -55,15 +59,16 @@ export async function listTasksForUser(userId: string, filters: TaskListFilters 
     .where(and(...conditions))
     .orderBy(desc(generationTasks.startedAt));
 
-  if (filters.latest) {
-    return rows.slice(0, 1);
-  }
+  const limitedRows = filters.latest
+    ? rows.slice(0, 1)
+    : filters.limit && filters.limit > 0
+      ? rows.slice(0, filters.limit)
+      : rows;
 
-  if (filters.limit && filters.limit > 0) {
-    return rows.slice(0, filters.limit);
-  }
-
-  return rows;
+  return limitedRows.map((task) => ({
+    ...task,
+    presentation: buildTaskPresentation(task),
+  }));
 }
 
 export async function getTaskForUser(taskId: string, userId: string) {
@@ -86,6 +91,22 @@ export async function getTaskForUser(taskId: string, userId: string) {
     .limit(1);
 
   return task;
+}
+
+export async function getTaskWithProgressForUser(taskId: string, userId: string) {
+  const task = await getTaskForUser(taskId, userId);
+
+  if (!task) {
+    return null;
+  }
+
+  const progress = await buildTaskProgress(task);
+
+  return {
+    ...task,
+    progress,
+    presentation: buildTaskPresentation(task, progress),
+  };
 }
 
 export async function buildTaskProgress(task: {

@@ -16,7 +16,9 @@ import {
   createOrReuseGenerationTask,
   failGenerationTask,
   getActiveGenerationTask,
-  isGenerationTaskCancelled,
+  GenerationTaskCancelledError,
+  touchGenerationTaskHeartbeat,
+  throwIfGenerationTaskCancelled,
   updateGenerationTaskProgress,
 } from "@/lib/generation";
 
@@ -189,7 +191,6 @@ export async function POST(request: NextRequest) {
       characters: Array.isArray(drama.characters) ? drama.characters : [],
       uploadDir,
       allEpisodes,
-      totalCredits,
     }).catch(console.error);
 
     return NextResponse.json({
@@ -221,7 +222,6 @@ type StoryboardGenerationParams = {
   characters: Character[];
   uploadDir: string;
   allEpisodes: Episode[];
-  totalCredits: number;
 };
 
 async function processStoryboardGeneration({
@@ -232,19 +232,50 @@ async function processStoryboardGeneration({
   characters,
   uploadDir,
   allEpisodes,
-  totalCredits,
 }: StoryboardGenerationParams) {
   try {
     const results: { episodeNumber: number; imageUrl: string; shotImages?: { shotNumber: number; imageUrl: string }[] }[] = [];
+    let creditsUsed = 0;
 
     for (const episode of allEpisodes) {
-      if (await isGenerationTaskCancelled(taskId)) {
-        return;
-      }
+      await throwIfGenerationTaskCancelled(taskId);
 
       try {
+        await touchGenerationTaskHeartbeat(taskId, {
+          currentEpisode: episode.episodeNumber,
+          stage: "generate",
+          completedCount: results.length,
+          episodeCount: allEpisodes.length,
+          creditsUsed,
+        });
+
         if (episode.shotData && Array.isArray(episode.shotData)) {
-          const result = await handleShotStoryboard(episode, style, dramaId, uploadDir, characters);
+          const result = await handleShotStoryboard(
+            episode,
+            style,
+            dramaId,
+            uploadDir,
+            characters,
+            false
+          );
+          await throwIfGenerationTaskCancelled(taskId);
+
+          if (result.imageUrl) {
+            await requireCreditDeduction(
+              userId,
+              "storyboard",
+              undefined,
+              dramaId,
+              `生成分镜 - 第${episode.episodeNumber}集`
+            );
+            creditsUsed += CREDIT_COSTS.storyboard;
+
+            await db
+              .update(episodes)
+              .set({ imageUrl: result.imageUrl })
+              .where(eq(episodes.id, episode.id));
+          }
+
           results.push(result);
         } else {
           const scriptContent = episode.scriptContent
@@ -255,6 +286,16 @@ async function processStoryboardGeneration({
             scriptContent?.sceneDescription || episode.narrationText || "cinematic scene";
 
           const imageUrl = await generateImage(sceneDescription, style || "realistic");
+          await throwIfGenerationTaskCancelled(taskId);
+
+          await requireCreditDeduction(
+            userId,
+            "storyboard",
+            undefined,
+            dramaId,
+            `生成分镜 - 第${episode.episodeNumber}集`
+          );
+          creditsUsed += CREDIT_COSTS.storyboard;
 
           await db
             .update(episodes)
@@ -264,6 +305,9 @@ async function processStoryboardGeneration({
           results.push({ episodeNumber: episode.episodeNumber, imageUrl });
         }
       } catch (err) {
+        if (err instanceof GenerationTaskCancelledError) {
+          throw err;
+        }
         console.error(`Failed to generate image for episode ${episode.episodeNumber}:`, err);
         results.push({ episodeNumber: episode.episodeNumber, imageUrl: "" });
       }
@@ -271,6 +315,7 @@ async function processStoryboardGeneration({
       await updateGenerationTaskProgress(taskId, {
         completedCount: results.length,
         episodeCount: allEpisodes.length,
+        creditsUsed,
       });
     }
 
@@ -297,22 +342,19 @@ async function processStoryboardGeneration({
       throw new Error("未生成任何可用分镜");
     }
 
-    await requireCreditDeduction(
-      userId,
-      "storyboard",
-      totalCredits,
-      dramaId,
-      `生成分镜图片 - 共${allEpisodes.length}集`
-    );
-
     await updateDramaStatus(dramaId, "storyboard_ready");
 
     await completeGenerationTask(taskId, {
       completedCount: results.length,
       episodeCount: allEpisodes.length,
+      creditsUsed,
       results,
     });
   } catch (error) {
+    if (error instanceof GenerationTaskCancelledError) {
+      return;
+    }
+
     await failGenerationTask(
       taskId,
       dramaId,
@@ -328,7 +370,8 @@ async function handleShotStoryboard(
   style: string | null,
   dramaId: string,
   uploadDir: string,
-  characters: Character[] = []
+  characters: Character[] = [],
+  persistEpisodeImage: boolean = true
 ): Promise<{ episodeNumber: number; imageUrl: string; shotImages: { shotNumber: number; imageUrl: string }[] }> {
   const shots = episode.shotData as unknown as Shot[];
   const shotImages: { shotNumber: number; imageUrl: string }[] = [];
@@ -376,10 +419,12 @@ async function handleShotStoryboard(
   // Use first shot image as episode image
   const firstImageUrl = shotImages.find((s) => s.imageUrl)?.imageUrl || "";
 
-  await db
-    .update(episodes)
-    .set({ imageUrl: firstImageUrl || null })
-    .where(eq(episodes.id, episode.id));
+  if (persistEpisodeImage) {
+    await db
+      .update(episodes)
+      .set({ imageUrl: firstImageUrl || null })
+      .where(eq(episodes.id, episode.id));
+  }
 
   return {
     episodeNumber: episode.episodeNumber,

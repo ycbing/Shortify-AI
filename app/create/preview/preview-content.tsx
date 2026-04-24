@@ -40,6 +40,18 @@ interface TaskSummary {
   errorMessage?: string | null;
   startedAt?: string | null;
   completedAt?: string | null;
+  presentation?: {
+    typeLabel: string;
+    statusLabel: string;
+    statusTone: "neutral" | "warning" | "success" | "danger";
+    stageLabel: string | null;
+    summary: string;
+    retryable: boolean;
+    failureTitle: string | null;
+    failureHint: string | null;
+    durationMs: number | null;
+    creditsUsed: number;
+  };
 }
 
 /** Convert a local upload path or COS URL to an accessible URL */
@@ -127,7 +139,7 @@ export default function PreviewPageContent() {
       setLoadingAction("");
       setActionProgress({ current: 0, total: 0 });
       setActiveTaskId(null);
-      setTaskProgressLabel("");
+      setTaskProgressLabel(task.presentation?.summary || "");
       if (isComposeTask && mergedUrl) {
         setMergedVideoUrl(toPublicUrl(mergedUrl));
       }
@@ -142,7 +154,7 @@ export default function PreviewPageContent() {
       );
     },
     onFailed: async (task) => {
-      const errorMessage = task.errorMessage || (
+      const errorMessage = task.errorMessage || task.presentation?.failureTitle || (
         task.type === "voiceover"
           ? "配音生成失败"
           : task.type === "compose"
@@ -153,7 +165,7 @@ export default function PreviewPageContent() {
       setLoadingAction("");
       setActionProgress({ current: 0, total: 0 });
       setActiveTaskId(null);
-      setTaskProgressLabel("");
+      setTaskProgressLabel(task.presentation?.summary || "");
       await fetchEpisodes(false);
       await fetchTaskHistory();
       toast.error(errorMessage);
@@ -471,7 +483,7 @@ export default function PreviewPageContent() {
   }));
 
   const getActionLabel = () => {
-    const activeLabel = activeProgress?.label || taskProgressLabel;
+    const activeLabel = activeProgress?.label || activeTask?.presentation?.summary || taskProgressLabel;
     if (loadingAction.startsWith("voiceover")) {
       if (activeLabel) return activeLabel;
       const isSingle = loadingAction.includes("-");
@@ -512,19 +524,19 @@ export default function PreviewPageContent() {
     return type;
   };
 
+  const getPresentationToneClasses = (tone?: TaskSummary["presentation"]["statusTone"]) => {
+    if (tone === "success") return "bg-emerald-500/10 text-emerald-400 border-emerald-500/30";
+    if (tone === "danger") return "bg-red-500/10 text-red-400 border-red-500/30";
+    if (tone === "neutral") return "bg-zinc-500/10 text-zinc-300 border-zinc-500/30";
+    return "bg-amber-500/10 text-amber-400 border-amber-500/30";
+  };
+
   const formatTaskStatus = (status: string) => {
     if (status === "processing") return "进行中";
     if (status === "completed") return "已完成";
     if (status === "failed") return "失败";
     if (status === "cancelled") return "已取消";
     return status;
-  };
-
-  const getTaskStatusClasses = (status: string) => {
-    if (status === "completed") return "bg-emerald-500/10 text-emerald-400 border-emerald-500/30";
-    if (status === "failed") return "bg-red-500/10 text-red-400 border-red-500/30";
-    if (status === "cancelled") return "bg-zinc-500/10 text-zinc-300 border-zinc-500/30";
-    return "bg-amber-500/10 text-amber-400 border-amber-500/30";
   };
 
   const formatTaskTime = (value?: string | null) => {
@@ -672,23 +684,48 @@ export default function PreviewPageContent() {
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 mb-1 flex-wrap">
-                        <Badge variant="outline">{formatTaskType(task.type)}</Badge>
-                        <Badge variant="outline" className={getTaskStatusClasses(task.status)}>
-                          {formatTaskStatus(task.status)}
+                        <Badge variant="outline">
+                          {task.presentation?.typeLabel || formatTaskType(task.type)}
+                        </Badge>
+                        <Badge
+                          variant="outline"
+                          className={getPresentationToneClasses(task.presentation?.statusTone)}
+                        >
+                          {task.presentation?.statusLabel || formatTaskStatus(task.status)}
                         </Badge>
                       </div>
+                      {task.presentation?.summary && (
+                        <p className="text-xs sm:text-sm text-foreground/80">{task.presentation.summary}</p>
+                      )}
+                      {task.presentation?.stageLabel && task.status === "processing" && (
+                        <p className="mt-1 text-xs text-amber-400">{task.presentation.stageLabel}</p>
+                      )}
                       <div className="text-xs text-muted-foreground flex items-center gap-1.5">
                         <Clock3 className="h-3.5 w-3.5" />
                         <span>
                           {formatTaskTime(task.startedAt)}
                           {task.completedAt ? ` -> ${formatTaskTime(task.completedAt)}` : ""}
                         </span>
+                        {typeof task.presentation?.durationMs === "number" && task.presentation.durationMs > 0 && (
+                          <span>· {Math.max(1, Math.round(task.presentation.durationMs / 1000))} 秒</span>
+                        )}
+                        {task.presentation?.creditsUsed ? (
+                          <span>· 已扣 {task.presentation.creditsUsed} 积分</span>
+                        ) : null}
                       </div>
                       {task.errorMessage && (
-                        <p className="mt-2 text-xs sm:text-sm text-red-400">{task.errorMessage}</p>
+                        <div className="mt-2 space-y-1">
+                          <p className="text-xs sm:text-sm text-red-400">
+                            {task.presentation?.failureTitle || task.errorMessage}
+                          </p>
+                          <p className="text-xs text-muted-foreground">{task.errorMessage}</p>
+                          {task.presentation?.failureHint && (
+                            <p className="text-xs text-muted-foreground">{task.presentation.failureHint}</p>
+                          )}
+                        </div>
                       )}
                     </div>
-                    {(task.type === "voiceover" || task.type === "compose" || task.type === "video") && task.status !== "processing" && (
+                    {(task.type === "voiceover" || task.type === "compose" || task.type === "video") && task.status !== "processing" && task.presentation?.retryable !== false && (
                       <Button
                         variant="outline"
                         size="sm"

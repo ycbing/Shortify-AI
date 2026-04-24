@@ -14,7 +14,9 @@ import {
   createOrReuseGenerationTask,
   failGenerationTask,
   getActiveGenerationTask,
-  isGenerationTaskCancelled,
+  GenerationTaskCancelledError,
+  touchGenerationTaskHeartbeat,
+  throwIfGenerationTaskCancelled,
   updateGenerationTaskProgress,
 } from "@/lib/generation";
 
@@ -176,7 +178,6 @@ export async function POST(request: NextRequest) {
       userId: session.user.id,
       uploadDir,
       allEpisodes,
-      totalCredits: totalVoiceoverCredits,
     }).catch(console.error);
 
     return NextResponse.json({
@@ -206,7 +207,6 @@ type VoiceoverGenerationParams = {
   userId: string;
   uploadDir: string;
   allEpisodes: Episode[];
-  totalCredits: number;
 };
 
 async function processVoiceoverGeneration({
@@ -215,17 +215,23 @@ async function processVoiceoverGeneration({
   userId,
   uploadDir,
   allEpisodes,
-  totalCredits,
 }: VoiceoverGenerationParams) {
   try {
     const results: { episodeNumber: number; voiceoverUrl: string; duration: number; shotAudios?: unknown[] }[] = [];
+    let creditsUsed = 0;
 
     for (const episode of allEpisodes) {
-      if (await isGenerationTaskCancelled(taskId)) {
-        return;
-      }
+      await throwIfGenerationTaskCancelled(taskId);
 
       try {
+        await touchGenerationTaskHeartbeat(taskId, {
+          currentEpisode: episode.episodeNumber,
+          stage: "generate",
+          completedCount: results.length,
+          episodeCount: allEpisodes.length,
+          creditsUsed,
+        });
+
         if (episode.shotData && Array.isArray(episode.shotData)) {
           const shots = episode.shotData as Shot[];
           const shotAudios = await generateShotVoiceovers(
@@ -241,6 +247,16 @@ async function processVoiceoverGeneration({
             dramaId,
             `episode-${episode.episodeNumber}`
           );
+          await throwIfGenerationTaskCancelled(taskId);
+
+          await requireCreditDeduction(
+            userId,
+            "voiceover",
+            undefined,
+            dramaId,
+            `生成配音 - 第${episode.episodeNumber}集`
+          );
+          creditsUsed += CREDIT_COSTS.voiceover;
 
           await db
             .update(episodes)
@@ -265,6 +281,16 @@ async function processVoiceoverGeneration({
           );
 
           const result = await generateVoiceover(episode.narrationText, outputPath);
+          await throwIfGenerationTaskCancelled(taskId);
+
+          await requireCreditDeduction(
+            userId,
+            "voiceover",
+            undefined,
+            dramaId,
+            `生成配音 - 第${episode.episodeNumber}集`
+          );
+          creditsUsed += CREDIT_COSTS.voiceover;
 
           await db
             .update(episodes)
@@ -281,12 +307,16 @@ async function processVoiceoverGeneration({
           });
         }
       } catch (err) {
+        if (err instanceof GenerationTaskCancelledError) {
+          throw err;
+        }
         console.error(`Failed to generate voiceover for episode ${episode.episodeNumber}:`, err);
       }
 
       await updateGenerationTaskProgress(taskId, {
         completedCount: results.length,
         episodeCount: allEpisodes.length,
+        creditsUsed,
       });
     }
 
@@ -295,22 +325,19 @@ async function processVoiceoverGeneration({
       throw new Error("未生成任何可用配音");
     }
 
-    await requireCreditDeduction(
-      userId,
-      "voiceover",
-      totalCredits,
-      dramaId,
-      `生成配音 - 共${allEpisodes.length}集`
-    );
-
     await updateDramaStatus(dramaId, "voiceover_ready");
 
     await completeGenerationTask(taskId, {
       completedCount: results.length,
       episodeCount: allEpisodes.length,
+      creditsUsed,
       results,
     });
   } catch (error) {
+    if (error instanceof GenerationTaskCancelledError) {
+      return;
+    }
+
     await failGenerationTask(
       taskId,
       dramaId,

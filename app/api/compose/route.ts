@@ -17,9 +17,11 @@ import { updateDramaStatus } from "@/lib/drama-status";
 import {
   createOrReuseGenerationTask,
   getActiveGenerationTask,
-  isGenerationTaskCancelled,
   completeGenerationTask,
   failGenerationTask,
+  GenerationTaskCancelledError,
+  throwIfGenerationTaskCancelled,
+  touchGenerationTaskHeartbeat,
   updateGenerationTaskProgress,
 } from "@/lib/generation";
 
@@ -270,7 +272,6 @@ export async function POST(request: NextRequest) {
       dramaBgmUrl: drama.bgmUrl,
       dramaGenre: drama.genre,
       allEpisodes,
-      totalComposeCredits,
     }).catch(console.error);
 
     return NextResponse.json({
@@ -303,7 +304,6 @@ type ComposeGenerationParams = {
   dramaBgmUrl: string | null;
   dramaGenre: string | null;
   allEpisodes: Episode[];
-  totalComposeCredits: number;
 };
 
 async function processComposeGeneration({
@@ -315,10 +315,10 @@ async function processComposeGeneration({
   dramaBgmUrl,
   dramaGenre,
   allEpisodes,
-  totalComposeCredits,
 }: ComposeGenerationParams) {
   try {
     const videoPaths: string[] = [];
+    let creditsUsed = 0;
 
     let resolvedBgmPath: string | null = null;
     if (dramaBgmUrl) {
@@ -333,9 +333,7 @@ async function processComposeGeneration({
     const dramaBgmVolume = dramaBgmUrl ? (BGM_VOLUME_MAP[inferBgmPreset(dramaGenre)] ?? 0.15) : 0.15;
 
     for (const episode of allEpisodes) {
-      if (await isGenerationTaskCancelled(taskId)) {
-        return;
-      }
+      await throwIfGenerationTaskCancelled(taskId);
 
       try {
         const outputPath = path.join(
@@ -386,6 +384,10 @@ async function processComposeGeneration({
           let subtitlePath = episode.subtitleUrl;
           if (!subtitlePath) {
             if (useAsr && isAsrConfigured()) {
+              await touchGenerationTaskHeartbeat(taskId, {
+                currentEpisode: episode.episodeNumber,
+                stage: "subtitles",
+              });
               const asrResult = await generateSubtitlesWithASR(
                 shots,
                 shotAudios,
@@ -394,6 +396,10 @@ async function processComposeGeneration({
               );
               subtitlePath = asrResult.subtitlePath;
             } else {
+              await touchGenerationTaskHeartbeat(taskId, {
+                currentEpisode: episode.episodeNumber,
+                stage: "subtitles",
+              });
               subtitlePath = await generateSubtitles(
                 shots,
                 shotAudios,
@@ -401,12 +407,17 @@ async function processComposeGeneration({
                 episode.episodeNumber
               );
             }
+            await throwIfGenerationTaskCancelled(taskId);
             await db
               .update(episodes)
               .set({ subtitleUrl: subtitlePath })
               .where(eq(episodes.id, episode.id));
           }
 
+          await touchGenerationTaskHeartbeat(taskId, {
+            currentEpisode: episode.episodeNumber,
+            stage: "compose",
+          });
           await composeEpisodeFromShots(
             shots,
             shotAudios,
@@ -422,6 +433,10 @@ async function processComposeGeneration({
             }
           );
         } else if (episode.imageUrl && episode.voiceoverUrl) {
+          await touchGenerationTaskHeartbeat(taskId, {
+            currentEpisode: episode.episodeNumber,
+            stage: "compose",
+          });
           await composeVideo({
             imagePath: episode.imageUrl,
             audioPath: episode.voiceoverUrl,
@@ -432,8 +447,19 @@ async function processComposeGeneration({
           continue;
         }
 
+        await throwIfGenerationTaskCancelled(taskId);
+        await requireCreditDeduction(
+          userId,
+          "compose",
+          undefined,
+          dramaId,
+          `合成视频 - 第${episode.episodeNumber}集`
+        );
+        creditsUsed += CREDIT_COSTS.compose;
+
         const cosKeyAll = videoCosKey(dramaId, episode.episodeNumber);
         const finalVideoUrlAll = toDbPath(await uploadFileToCos(outputPath, cosKeyAll));
+        await throwIfGenerationTaskCancelled(taskId);
 
         await db
           .update(episodes)
@@ -442,12 +468,16 @@ async function processComposeGeneration({
 
         videoPaths.push(outputPath);
       } catch (err) {
+        if (err instanceof GenerationTaskCancelledError) {
+          throw err;
+        }
         console.error(`Failed to compose episode ${episode.episodeNumber}:`, err);
       }
 
       await updateGenerationTaskProgress(taskId, {
         completedCount: videoPaths.length,
         episodeCount: allEpisodes.length,
+        creditsUsed,
       });
     }
 
@@ -456,6 +486,12 @@ async function processComposeGeneration({
     }
 
     const mergedPath = path.join(uploadDir, "videos", `${dramaId}`, "complete.mp4");
+    await touchGenerationTaskHeartbeat(taskId, {
+      stage: "merge",
+      completedCount: videoPaths.length,
+      episodeCount: allEpisodes.length,
+      creditsUsed,
+    });
     const localMergedPath = await mergeVideos(videoPaths, mergedPath);
     const mergedCosKey = `${dramaId}/videos/complete.mp4`;
     const mergedUrl = toDbPath(await uploadFileToCos(localMergedPath, mergedCosKey));
@@ -463,14 +499,6 @@ async function processComposeGeneration({
     const totalDuration = allEpisodes.reduce(
       (sum, ep) => sum + (ep.duration || 0),
       0
-    );
-
-    await requireCreditDeduction(
-      userId,
-      "compose",
-      totalComposeCredits,
-      dramaId,
-      `合成视频 - 共${allEpisodes.length}集`
     );
 
     await db
@@ -485,9 +513,14 @@ async function processComposeGeneration({
       completedCount: videoPaths.length,
       episodeCount: allEpisodes.length,
       videoCount: videoPaths.length,
+      creditsUsed,
       mergedUrl,
     });
   } catch (error) {
+    if (error instanceof GenerationTaskCancelledError) {
+      return;
+    }
+
     await failGenerationTask(
       taskId,
       dramaId,

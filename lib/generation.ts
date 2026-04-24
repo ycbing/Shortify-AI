@@ -4,6 +4,78 @@ import { db } from "@/lib/db";
 import { dramas, generationTasks } from "@/lib/db/schema";
 import { inferDramaStatus, updateDramaStatus } from "@/lib/drama-status";
 
+const GENERATION_TASK_HEARTBEAT_TIMEOUT_MS = 15 * 60 * 1000;
+
+type TaskDataRecord = Record<string, unknown>;
+
+export class GenerationTaskCancelledError extends Error {
+  constructor(message = "任务已取消") {
+    super(message);
+    this.name = "GenerationTaskCancelledError";
+  }
+}
+
+function asTaskDataRecord(value: unknown): TaskDataRecord {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  return value as TaskDataRecord;
+}
+
+function getHeartbeatDate(outputData: unknown, startedAt: Date | null) {
+  const record = asTaskDataRecord(outputData);
+  const heartbeatAt =
+    typeof record.heartbeatAt === "string" ? new Date(record.heartbeatAt) : null;
+
+  if (heartbeatAt && !Number.isNaN(heartbeatAt.getTime())) {
+    return heartbeatAt;
+  }
+
+  return startedAt;
+}
+
+async function restoreDramaStatusForTask(taskId: string, dramaId: string) {
+  const [task] = await db
+    .select({ inputData: generationTasks.inputData })
+    .from(generationTasks)
+    .where(eq(generationTasks.id, taskId))
+    .limit(1);
+
+  const inputData = asTaskDataRecord(task?.inputData);
+  const previousDramaStatus =
+    typeof inputData.previousDramaStatus === "string"
+      ? inputData.previousDramaStatus
+      : null;
+
+  const inferredStatus = await inferDramaStatus(dramaId);
+  const nextDramaStatus =
+    previousDramaStatus &&
+    previousDramaStatus !== "generating" &&
+    previousDramaStatus !== "error"
+      ? previousDramaStatus
+      : inferredStatus;
+
+  await updateDramaStatus(dramaId, nextDramaStatus);
+}
+
+export async function expireGenerationTask(
+  taskId: string,
+  dramaId: string,
+  errorMessage = "任务已超时失效，请重新发起生成"
+) {
+  await db
+    .update(generationTasks)
+    .set({
+      status: "failed",
+      errorMessage,
+      completedAt: new Date(),
+    })
+    .where(eq(generationTasks.id, taskId));
+
+  await restoreDramaStatusForTask(taskId, dramaId);
+}
+
 export async function getActiveGenerationTask(
   dramaId: string,
   type: string
@@ -20,6 +92,19 @@ export async function getActiveGenerationTask(
     )
     .orderBy(desc(generationTasks.startedAt))
     .limit(1);
+
+  if (!task) {
+    return null;
+  }
+
+  const heartbeatDate = getHeartbeatDate(task.outputData, task.startedAt ?? null);
+  const isStale =
+    !heartbeatDate || Date.now() - heartbeatDate.getTime() > GENERATION_TASK_HEARTBEAT_TIMEOUT_MS;
+
+  if (isStale) {
+    await expireGenerationTask(task.id, dramaId);
+    return null;
+  }
 
   return task;
 }
@@ -38,11 +123,16 @@ export async function completeGenerationTask(
   taskId: string,
   outputData?: Record<string, unknown>
 ) {
+  const current = await getGenerationTaskOutput(taskId);
   await db
     .update(generationTasks)
     .set({
       status: "completed",
-      outputData,
+      outputData: {
+        ...current,
+        ...outputData,
+        heartbeatAt: new Date().toISOString(),
+      },
       completedAt: new Date(),
       errorMessage: null,
     })
@@ -86,6 +176,9 @@ export async function createOrReuseGenerationTask({
       ...inputData,
       previousDramaStatus: drama?.status || null,
     },
+    outputData: {
+      heartbeatAt: new Date().toISOString(),
+    },
     startedAt: new Date(),
   });
 
@@ -97,17 +190,40 @@ export async function createOrReuseGenerationTask({
   };
 }
 
+async function getGenerationTaskOutput(taskId: string) {
+  const [task] = await db
+    .select({ outputData: generationTasks.outputData })
+    .from(generationTasks)
+    .where(eq(generationTasks.id, taskId))
+    .limit(1);
+
+  return asTaskDataRecord(task?.outputData);
+}
+
+export async function touchGenerationTaskHeartbeat(
+  taskId: string,
+  outputPatch: Record<string, unknown> = {}
+) {
+  const current = await getGenerationTaskOutput(taskId);
+
+  await db
+    .update(generationTasks)
+    .set({
+      outputData: {
+        ...current,
+        ...outputPatch,
+        heartbeatAt: new Date().toISOString(),
+      },
+      errorMessage: null,
+    })
+    .where(eq(generationTasks.id, taskId));
+}
+
 export async function updateGenerationTaskProgress(
   taskId: string,
   outputData: Record<string, unknown>
 ) {
-  await db
-    .update(generationTasks)
-    .set({
-      outputData,
-      errorMessage: null,
-    })
-    .where(eq(generationTasks.id, taskId));
+  await touchGenerationTaskHeartbeat(taskId, outputData);
 }
 
 export async function failGenerationTask(
@@ -138,27 +254,6 @@ export async function cancelGenerationTask(
   dramaId: string,
   errorMessage = "任务已取消"
 ) {
-  const [task] = await db
-    .select({ inputData: generationTasks.inputData })
-    .from(generationTasks)
-    .where(eq(generationTasks.id, taskId))
-    .limit(1);
-
-  const previousDramaStatus =
-    task?.inputData &&
-    typeof task.inputData === "object" &&
-    !Array.isArray(task.inputData) &&
-    "previousDramaStatus" in task.inputData &&
-    typeof (task.inputData as Record<string, unknown>).previousDramaStatus === "string"
-      ? ((task.inputData as Record<string, unknown>).previousDramaStatus as string)
-      : null;
-
-  const inferredStatus = await inferDramaStatus(dramaId);
-  const nextDramaStatus =
-    previousDramaStatus && previousDramaStatus !== "generating" && previousDramaStatus !== "error"
-      ? previousDramaStatus
-      : inferredStatus;
-
   await db
     .update(generationTasks)
     .set({
@@ -168,5 +263,11 @@ export async function cancelGenerationTask(
     })
     .where(eq(generationTasks.id, taskId));
 
-  await updateDramaStatus(dramaId, nextDramaStatus);
+  await restoreDramaStatusForTask(taskId, dramaId);
+}
+
+export async function throwIfGenerationTaskCancelled(taskId: string) {
+  if (await isGenerationTaskCancelled(taskId)) {
+    throw new GenerationTaskCancelledError();
+  }
 }

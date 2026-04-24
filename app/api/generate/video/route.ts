@@ -27,8 +27,11 @@ import {
   completeGenerationTask,
   createOrReuseGenerationTask,
   failGenerationTask,
+  GenerationTaskCancelledError,
   getActiveGenerationTask,
-  isGenerationTaskCancelled,
+  throwIfGenerationTaskCancelled,
+  touchGenerationTaskHeartbeat,
+  updateGenerationTaskProgress,
 } from "@/lib/generation";
 
 const execAsync = promisify(exec);
@@ -313,11 +316,10 @@ async function processVideos(
     }[] = [];
 
     let totalCreditsUsed = 0;
+    let completedCount = 0;
 
     for (const episode of episodesList) {
-      if (await isGenerationTaskCancelled(taskId)) {
-        return;
-      }
+      await throwIfGenerationTaskCancelled(taskId);
 
       const epNum = episode.episodeNumber;
       const shots = (episode.shotData as Shot[]).slice(); // shallow clone
@@ -338,9 +340,7 @@ async function processVideos(
       let shotsSkipped = 0;
 
       for (const shot of shots) {
-        if (await isGenerationTaskCancelled(taskId)) {
-          return;
-        }
+        await throwIfGenerationTaskCancelled(taskId);
 
         // Skip shots that already have aiVideoUrl
         if (shot.aiVideoUrl) {
@@ -369,16 +369,34 @@ async function processVideos(
         console.log(`Episode ${epNum} Shot ${shot.shotNumber}: generating AI video (prompt: ${prompt.substring(0, 50)}...)`);
 
         // 4. Submit video generation (no fps, no duration - cogvideox-3 doesn't support them)
+        await touchGenerationTaskHeartbeat(taskId, {
+          currentEpisode: epNum,
+          currentShot: shot.shotNumber,
+          stage: "submit",
+          completedCount,
+          episodeCount: episodesList.length,
+          creditsUsed: totalCreditsUsed,
+        });
         const { taskId: videoTaskId } = await submitVideoGeneration(prompt, signedImageUrl, style);
         console.log(`Episode ${epNum} Shot ${shot.shotNumber}: video task submitted: ${videoTaskId}`);
 
         // 5. Wait for completion (max 5 min per shot)
+        await touchGenerationTaskHeartbeat(taskId, {
+          currentEpisode: epNum,
+          currentShot: shot.shotNumber,
+          stage: "waiting",
+          completedCount,
+          episodeCount: episodesList.length,
+          creditsUsed: totalCreditsUsed,
+        });
         const result = await waitForVideoCompletion(videoTaskId, 300000, 5000);
+        await throwIfGenerationTaskCancelled(taskId);
 
         // 6. Download video to local
         const localVideoDir = path.join(uploadDir, "videos", dramaId, `episode-${epNum}-ai`);
         const localVideoPath = path.join(localVideoDir, `shot-${shot.shotNumber}.mp4`);
         await downloadVideo(result.videoUrl, localVideoPath);
+        await throwIfGenerationTaskCancelled(taskId);
 
         // 7. Mix voiceover audio into the AI video immediately (one encode pass)
         const voiceoverPath = path.join(uploadDir, "voiceovers", dramaId, `episode-${epNum}`, `shot-${shot.shotNumber}.mp3`);
@@ -399,6 +417,7 @@ async function processVideos(
         // 7. Upload video to COS
         const cosKey = aiVideoCosKey(dramaId, epNum, shot.shotNumber);
         const cosUrl = await uploadFileToCos(localVideoPath, cosKey);
+        await throwIfGenerationTaskCancelled(taskId);
         shot.aiVideoUrl = cosUrl;
 
         // Deduct credits per shot
@@ -406,8 +425,20 @@ async function processVideos(
         totalCreditsUsed += CREDIT_COSTS.video;
 
         shotsGenerated++;
+        completedCount++;
+        await updateGenerationTaskProgress(taskId, {
+          completedCount,
+          episodeCount: episodesList.length,
+          creditsUsed: totalCreditsUsed,
+          currentEpisode: epNum,
+          currentShot: shot.shotNumber,
+          stage: "persist",
+        });
         console.log(`Episode ${epNum} Shot ${shot.shotNumber}: AI video saved: ${cosUrl}`);
         } catch (err) {
+          if (err instanceof GenerationTaskCancelledError) {
+            throw err;
+          }
           console.error(`Failed to generate video for Episode ${epNum} Shot ${shot.shotNumber}:`, err);
           // Continue with next shot instead of failing the whole episode
         }
@@ -474,6 +505,14 @@ async function processVideos(
         shotsGenerated,
         shotsSkipped,
       });
+
+      await updateGenerationTaskProgress(taskId, {
+        completedCount,
+        episodeCount: episodesList.length,
+        creditsUsed: totalCreditsUsed,
+        currentEpisode: epNum,
+        stage: "episode-complete",
+      });
     }
 
     const hasSuccessfulEpisode = results.some((result) => result.success);
@@ -486,9 +525,15 @@ async function processVideos(
     await completeGenerationTask(taskId, {
       results,
       mode: "per-shot",
+      completedCount,
+      episodeCount: episodesList.length,
       creditsUsed: totalCreditsUsed,
     });
   } catch (error) {
+    if (error instanceof GenerationTaskCancelledError) {
+      return;
+    }
+
     console.error("Background video processing failed:", error);
     await failGenerationTask(
       taskId,

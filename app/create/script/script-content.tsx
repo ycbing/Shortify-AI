@@ -191,17 +191,17 @@ export default function ScriptPageContent() {
 
   const { task: activeTask, startPolling } = useTaskPolling(activeTaskId, {
     autoStart: false,
-    onCompleted: async () => {
+    onCompleted: async (task) => {
       setGenerating(false);
       setActiveTaskId(null);
-      setTaskProgressLabel("");
+      setTaskProgressLabel(task.presentation?.summary || "");
       await fetchScript();
     },
     onFailed: async (task) => {
       setGenerating(false);
       setActiveTaskId(null);
-      setTaskProgressLabel("");
-      setError(task.errorMessage || "剧本生成失败，请稍后重试");
+      setTaskProgressLabel(task.presentation?.summary || "");
+      setError(task.presentation?.failureTitle || task.errorMessage || "剧本生成失败，请稍后重试");
     },
   });
 

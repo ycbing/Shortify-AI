@@ -9,6 +9,20 @@ type TaskProgress = {
   label: string;
 };
 
+type TaskPresentation = {
+  typeLabel: string;
+  statusLabel: string;
+  statusTone: "neutral" | "warning" | "success" | "danger";
+  stageLabel: string | null;
+  summary: string;
+  retryable: boolean;
+  failureCode: string | null;
+  failureTitle: string | null;
+  failureHint: string | null;
+  durationMs: number | null;
+  creditsUsed: number;
+};
+
 type TaskStatus = {
   id: string;
   type: string;
@@ -16,6 +30,7 @@ type TaskStatus = {
   errorMessage?: string | null;
   progress?: TaskProgress;
   outputData?: Record<string, unknown> | null;
+  presentation?: TaskPresentation;
 };
 
 type UseTaskPollingOptions = {
