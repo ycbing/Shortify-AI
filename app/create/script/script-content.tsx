@@ -9,6 +9,7 @@ import { Loader2, ArrowRight, ArrowLeft, Sparkles, Users, Film } from "lucide-re
 import type { GeneratedEpisode, GeneratedScriptV2, Shot, Character, ShotAudio } from "@/types/drama";
 import { isScriptV2, VOICE_OPTIONS } from "@/types/drama";
 import Link from "next/link";
+import { useTaskPolling } from "@/lib/hooks/use-task-polling";
 
 const steps = [
   { number: 1, title: "创意" },
@@ -41,6 +42,8 @@ export default function ScriptPageContent() {
   const [generating, setGenerating] = useState(false);
   const [generateStartTime, setGenerateStartTime] = useState<number>(0);
   const [error, setError] = useState("");
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+  const [taskProgressLabel, setTaskProgressLabel] = useState("");
 
   const fetchScript = useCallback(async () => {
     if (!dramaId) return;
@@ -128,10 +131,39 @@ export default function ScriptPageContent() {
       // ignore
     }
 
+    try {
+      const taskRes = await fetch(`/api/tasks?dramaId=${dramaId}&type=script&status=processing&latest=1`);
+      const taskData = await taskRes.json();
+      if (taskRes.ok && Array.isArray(taskData.tasks) && taskData.tasks[0]?.id) {
+        setLoading(false);
+        setGenerating(true);
+        setActiveTaskId(taskData.tasks[0].id);
+        return;
+      }
+    } catch {
+      // ignore task resume errors
+    }
+
     // Auto-generate script
     setLoading(false);
     handleGenerate();
   }, [dramaId]);
+
+  const { task: activeTask, startPolling } = useTaskPolling(activeTaskId, {
+    autoStart: false,
+    onCompleted: async () => {
+      setGenerating(false);
+      setActiveTaskId(null);
+      setTaskProgressLabel("");
+      await fetchScript();
+    },
+    onFailed: async (task) => {
+      setGenerating(false);
+      setActiveTaskId(null);
+      setTaskProgressLabel("");
+      setError(task.errorMessage || "剧本生成失败，请稍后重试");
+    },
+  });
 
   useEffect(() => {
     if (!dramaId) {
@@ -140,6 +172,17 @@ export default function ScriptPageContent() {
     }
     fetchScript();
   }, [dramaId]);
+
+  useEffect(() => {
+    if (!activeTaskId) return;
+    void startPolling();
+  }, [activeTaskId, startPolling]);
+
+  useEffect(() => {
+    if (!activeTask?.progress) return;
+    setGenerating(true);
+    setTaskProgressLabel(activeTask.progress.label || "");
+  }, [activeTask]);
 
   const handleGenerate = async () => {
     if (!dramaId) return;
@@ -220,7 +263,17 @@ export default function ScriptPageContent() {
         </div>
 
         {error && (
-          <div className="mb-6 text-sm text-red-400 bg-red-500/10 rounded p-3">{error}</div>
+          <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-sm text-red-400 bg-red-500/10 rounded p-3">
+            <span>{error}</span>
+            <Button
+              variant="outline"
+              onClick={handleGenerate}
+              disabled={generating}
+              className="min-h-[40px] border-red-500/30 text-red-300 hover:text-red-200"
+            >
+              重试生成
+            </Button>
+          </div>
         )}
 
         {generating ? (
@@ -235,7 +288,7 @@ export default function ScriptPageContent() {
               <TypingDots />
             </p>
             <p className="text-sm text-muted-foreground mb-4">
-              通常需要 10-30 秒，请耐心等待
+              {taskProgressLabel || "通常需要 10-30 秒，请耐心等待"}
             </p>
             <div className="flex items-center gap-4 text-xs text-muted-foreground">
               <div className="flex items-center gap-1.5">

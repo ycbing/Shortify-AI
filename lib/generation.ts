@@ -17,6 +17,19 @@ export async function completeGenerationTask(
     .where(eq(generationTasks.id, taskId));
 }
 
+export async function updateGenerationTaskProgress(
+  taskId: string,
+  outputData: Record<string, unknown>
+) {
+  await db
+    .update(generationTasks)
+    .set({
+      outputData,
+      errorMessage: null,
+    })
+    .where(eq(generationTasks.id, taskId));
+}
+
 export async function failGenerationTask(
   taskId: string,
   dramaId: string,

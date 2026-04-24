@@ -11,6 +11,7 @@ import { Loader2, ArrowLeft, Film, Check, AlertCircle } from "lucide-react";
 import Link from "next/link";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
+import { useTaskPolling } from "@/lib/hooks/use-task-polling";
 
 const steps = [
   { number: 1, title: "创意" },
@@ -91,6 +92,29 @@ export default function PreviewPageContent() {
     }
   }, [dramaId]);
 
+  const { task: activeTask, pollError, startPolling, stopPolling } = useTaskPolling(activeTaskId, {
+    autoStart: false,
+    onCompleted: async (task) => {
+      const isVoiceoverTask = task.type === "voiceover";
+      setLoadingAction("");
+      setActionProgress({ current: 0, total: 0 });
+      setActiveTaskId(null);
+      setTaskProgressLabel("");
+      await fetchEpisodes(false);
+      toast.success(isVoiceoverTask ? "配音生成完成！" : "AI 视频生成完成！");
+    },
+    onFailed: async (task) => {
+      const errorMessage = task.errorMessage || (task.type === "voiceover" ? "配音生成失败" : "AI 视频生成失败");
+      setError(errorMessage);
+      setLoadingAction("");
+      setActionProgress({ current: 0, total: 0 });
+      setActiveTaskId(null);
+      setTaskProgressLabel("");
+      await fetchEpisodes(false);
+      toast.error(errorMessage);
+    },
+  });
+
   useEffect(() => {
     if (!dramaId) {
       router.push("/create");
@@ -99,64 +123,39 @@ export default function PreviewPageContent() {
     fetchEpisodes();
   }, [dramaId]);
 
-  const pollTask = useCallback(async (taskId: string) => {
+  const startTaskPolling = useCallback((taskId: string, type: "video" | "voiceover") => {
+    setError("");
+    setTaskProgressLabel("");
+    setActionProgress({ current: 0, total: 0 });
+    setLoadingAction(type === "voiceover" ? "voiceover" : "video-gen");
     setActiveTaskId(taskId);
-    setLoadingAction("video-gen");
+  }, []);
 
-    const poll = async () => {
-      try {
-        const res = await fetch(`/api/tasks/${taskId}`);
-        const data = await res.json();
+  useEffect(() => {
+    if (!activeTaskId) return;
+    void startPolling();
+  }, [activeTaskId, startPolling]);
 
-        if (!res.ok) {
-          throw new Error(data.error || "获取任务状态失败");
-        }
+  useEffect(() => {
+    const progress = activeTask?.progress;
+    if (progress) {
+      setTaskProgressLabel(progress.label || "");
+      setActionProgress({
+        current: progress.completed || 0,
+        total: progress.total || 0,
+      });
+    }
+  }, [activeTask]);
 
-        const task = data.task;
-        const progress = task.progress || { completed: 0, total: 0 };
-        setTaskProgressLabel(progress.label || "");
-        setActionProgress({
-          current: progress.completed || 0,
-          total: progress.total || 0,
-        });
-
-        if (task.status === "completed") {
-          setLoadingAction("");
-          setActionProgress({ current: 0, total: 0 });
-          setActiveTaskId(null);
-          setTaskProgressLabel("");
-          await fetchEpisodes(false);
-          toast.success("AI 视频生成完成！");
-          return;
-        }
-
-        if (task.status === "failed") {
-          const errorMessage = task.errorMessage || "AI 视频生成失败";
-          setError(errorMessage);
-          setLoadingAction("");
-          setActionProgress({ current: 0, total: 0 });
-          setActiveTaskId(null);
-          setTaskProgressLabel("");
-          await fetchEpisodes(false);
-          toast.error(errorMessage);
-          return;
-        }
-      } catch (pollError) {
-        const message = pollError instanceof Error ? pollError.message : "任务轮询失败";
-        setError(message);
-        setLoadingAction("");
-        setActionProgress({ current: 0, total: 0 });
-        setActiveTaskId(null);
-        setTaskProgressLabel("");
-        toast.error(message);
-        return;
-      }
-
-      window.setTimeout(poll, 5000);
-    };
-
-    window.setTimeout(poll, 1500);
-  }, [fetchEpisodes]);
+  useEffect(() => {
+    if (!pollError) return;
+    setError(pollError);
+    setLoadingAction("");
+    setActionProgress({ current: 0, total: 0 });
+    setActiveTaskId(null);
+    setTaskProgressLabel("");
+    toast.error(pollError);
+  }, [pollError]);
 
   // Auto-resume polling if drama is in generating state
   useEffect(() => {
@@ -174,7 +173,40 @@ export default function PreviewPageContent() {
 
         const latestTask = Array.isArray(data.tasks) ? data.tasks[0] : null;
         if (latestTask?.id) {
-          pollTask(latestTask.id);
+          startTaskPolling(latestTask.id, "video");
+        }
+      } catch {
+        // ignore resume errors
+      }
+    };
+
+    void resumeTaskPolling();
+
+    return () => {
+      cancelled = true;
+      stopPolling();
+    };
+  }, [activeTaskId, dramaId, dramaStatus, loadingAction, startTaskPolling, stopPolling]);
+
+  useEffect(() => {
+    if (!dramaId || loadingAction === "voiceover" || activeTaskId) {
+      return;
+    }
+
+    const needsVoiceover = episodes.some((episode) => !episode.voiceoverUrl);
+    if (!needsVoiceover) return;
+
+    let cancelled = false;
+
+    const resumeTaskPolling = async () => {
+      try {
+        const res = await fetch(`/api/tasks?dramaId=${dramaId}&type=voiceover&status=processing&latest=1`);
+        const data = await res.json();
+        if (!res.ok || cancelled) return;
+
+        const latestTask = Array.isArray(data.tasks) ? data.tasks[0] : null;
+        if (latestTask?.id) {
+          startTaskPolling(latestTask.id, "voiceover");
         }
       } catch {
         // ignore resume errors
@@ -186,49 +218,44 @@ export default function PreviewPageContent() {
     return () => {
       cancelled = true;
     };
-  }, [activeTaskId, dramaId, dramaStatus, loadingAction, pollTask]);
+  }, [activeTaskId, dramaId, episodes, loadingAction, startTaskPolling]);
 
   const handleGenerateAllVoiceovers = async () => {
     if (!dramaId) return;
     setLoadingAction("voiceover");
-    const episodesToProcess = episodes.filter((ep) => !ep.voiceoverUrl);
-    const total = episodesToProcess.length || episodes.length;
-
-    for (let i = 0; i < episodes.length; i++) {
-      if (episodesToProcess.length > 0 && episodes[i].voiceoverUrl) continue;
-      setActionProgress({ current: i + 1, total });
-      setLoadingAction(`voiceover-${i + 1}`);
-
-      try {
-        const res = await fetch("/api/generate/voiceover", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ dramaId, episodeId: episodes[i].id }),
-        });
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          const errMsg = errData.error || `第 ${episodes[i].episodeNumber} 集配音生成失败`;
-          setError(errMsg);
-          toast.error(errMsg);
-          if (errData.code === "INSUFFICIENT_CREDITS") {
-            toast.error("积分不足，请前往设置页面充值", { duration: 5000 });
-          }
-          break;
-        }
-      } catch {
-        const msg = `第 ${episodes[i].episodeNumber} 集配音生成失败`;
-        setError(msg);
-        toast.error(msg);
-        break;
-      }
-    }
-
-    await fetchEpisodes();
-    setLoadingAction("");
     setActionProgress({ current: 0, total: 0 });
+    setError("");
 
-    if (!error) {
-      toast.success("配音生成完成");
+    try {
+      const res = await fetch("/api/generate/voiceover", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dramaId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const errMsg = data.error || "配音生成失败";
+        setError(errMsg);
+        setLoadingAction("");
+        toast.error(errMsg);
+        if (data.code === "INSUFFICIENT_CREDITS") {
+          toast.error("积分不足，请前往设置页面充值", { duration: 5000 });
+        }
+        return;
+      }
+
+      if (data.taskId) {
+        startTaskPolling(data.taskId, "voiceover");
+        toast.success(data.message || "配音生成任务已启动");
+        return;
+      }
+
+      setLoadingAction("");
+      toast.warning("配音任务已启动，但未返回任务编号");
+    } catch {
+      setError("配音生成失败");
+      setLoadingAction("");
+      toast.error("网络错误，请重试");
     }
   };
 
@@ -320,7 +347,7 @@ export default function PreviewPageContent() {
         const data = await res.json();
         toast.success(data.message || "AI 视频生成已启动");
         if (data.taskId) {
-          pollTask(data.taskId);
+          startTaskPolling(data.taskId, "video");
         } else {
           setLoadingAction("");
           setTaskProgressLabel("");
@@ -362,10 +389,13 @@ export default function PreviewPageContent() {
 
   const getActionLabel = () => {
     if (loadingAction.startsWith("voiceover")) {
+      if (taskProgressLabel) return taskProgressLabel;
       const isSingle = loadingAction.includes("-");
       return isSingle
         ? `正在生成第 ${actionProgress.current}/${actionProgress.total} 集配音...`
-        : "正在生成配音...";
+        : actionProgress.total > 0
+          ? `正在生成配音... (${actionProgress.current}/${actionProgress.total})`
+          : "正在生成配音...";
     }
     if (loadingAction === "compose") {
       return actionProgress.total > 0

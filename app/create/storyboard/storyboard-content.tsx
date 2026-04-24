@@ -8,6 +8,7 @@ import { ShotCard } from "@/components/drama/shot-card";
 import { Loader2, ArrowRight, ArrowLeft, Image, ChevronDown, ChevronUp, Film } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
+import { useTaskPolling } from "@/lib/hooks/use-task-polling";
 
 const steps = [
   { number: 1, title: "创意" },
@@ -46,6 +47,8 @@ export default function StoryboardPageContent() {
   const [expandedEpisode, setExpandedEpisode] = useState<number | null>(null);
   const [error, setError] = useState("");
   const progressRef = useRef<HTMLDivElement>(null);
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+  const [taskProgressLabel, setTaskProgressLabel] = useState("");
 
   const fetchEpisodes = useCallback(async () => {
     if (!dramaId) return;
@@ -79,6 +82,26 @@ export default function StoryboardPageContent() {
     }
   }, [dramaId]);
 
+  const { task: activeTask, startPolling } = useTaskPolling(activeTaskId, {
+    autoStart: false,
+    onCompleted: async () => {
+      setGenerating(false);
+      setGeneratingIndex(-1);
+      setActiveTaskId(null);
+      setTaskProgressLabel("");
+      await fetchEpisodes();
+      toast.success("分镜生成完成");
+    },
+    onFailed: async (task) => {
+      setGenerating(false);
+      setGeneratingIndex(-1);
+      setActiveTaskId(null);
+      setTaskProgressLabel("");
+      setError(task.errorMessage || "分镜生成失败");
+      toast.error(task.errorMessage || "分镜生成失败");
+    },
+  });
+
   useEffect(() => {
     if (!dramaId) {
       router.push("/create");
@@ -87,81 +110,80 @@ export default function StoryboardPageContent() {
     fetchEpisodes();
   }, [dramaId]);
 
+  useEffect(() => {
+    if (!activeTaskId) return;
+    void startPolling();
+  }, [activeTaskId, startPolling]);
+
+  useEffect(() => {
+    if (!activeTask?.progress) return;
+    setGenerating(true);
+    setGeneratingIndex(-1);
+    setTaskProgressLabel(activeTask.progress.label || "");
+  }, [activeTask]);
+
+  useEffect(() => {
+    if (!dramaId || items.length === 0 || activeTaskId || generating) return;
+
+    const needsStoryboard = items.some((item) => !item.imageUrl);
+    if (!needsStoryboard) return;
+
+    let cancelled = false;
+    const resumeTask = async () => {
+      try {
+        const res = await fetch(`/api/tasks?dramaId=${dramaId}&type=storyboard&status=processing&latest=1`);
+        const data = await res.json();
+        if (!res.ok || cancelled) return;
+        const latestTask = Array.isArray(data.tasks) ? data.tasks[0] : null;
+        if (latestTask?.id) {
+          setActiveTaskId(latestTask.id);
+        }
+      } catch {
+        // ignore resume errors
+      }
+    };
+
+    void resumeTask();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTaskId, dramaId, generating, items]);
+
   const handleGenerateAll = async () => {
     if (!dramaId) return;
     setGenerating(true);
+    setGeneratingIndex(-1);
     setError("");
 
-    const allEpisodes = items.length > 0 ? items : await (async () => {
-      const res = await fetch(`/api/dramas/${dramaId}`);
-      if (res.ok) {
-        const data = await res.json();
-        return data.episodes.map((ep: any) => ({
-          id: ep.id,
-          episodeNumber: ep.episodeNumber,
-          title: ep.title || `第${ep.episodeNumber}集`,
-          imageUrl: ep.imageUrl,
-          narration: ep.narrationText || "",
-          shotData: Array.isArray(ep.shotData) ? ep.shotData : undefined,
-        }));
-      }
-      return [];
-    })();
-
-    const episodesToGenerate = allEpisodes.filter((ep: StoryboardItem) => !ep.imageUrl);
-
-    if (episodesToGenerate.length === 0 && allEpisodes.length > 0) {
-      try {
-        const res = await fetch("/api/generate/storyboard", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ dramaId }),
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          setError(data.error || "生成失败");
-          toast.error(data.error || "生成失败");
-          setGenerating(false);
-          return;
-        }
-        toast.success("分镜重新生成完成");
-        await fetchEpisodes();
-      } catch {
-        setError("分镜生成失败");
-        toast.error("分镜生成失败");
-      } finally {
+    try {
+      const res = await fetch("/api/generate/storyboard", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dramaId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error || "分镜生成失败");
+        toast.error(data.error || "分镜生成失败");
         setGenerating(false);
-        setGeneratingIndex(-1);
+        return;
       }
-      return;
-    }
 
-    for (let i = 0; i < allEpisodes.length; i++) {
-      if (episodesToGenerate.length > 0 && allEpisodes[i].imageUrl) continue;
-      setGeneratingIndex(i);
-      try {
-        const res = await fetch("/api/generate/storyboard", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ dramaId, episodeId: allEpisodes[i].id }),
-        });
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          setError(`第 ${allEpisodes[i].episodeNumber} 集分镜生成失败`);
-          toast.error(errData.error || `第 ${allEpisodes[i].episodeNumber} 集生成失败`);
-          break;
-        }
-      } catch {
-        setError(`第 ${allEpisodes[i].episodeNumber} 集分镜生成失败`);
-        toast.error(`第 ${allEpisodes[i].episodeNumber} 集生成失败`);
-        break;
+      if (data.taskId) {
+        setTaskProgressLabel("");
+        setActiveTaskId(data.taskId);
+        toast.success(data.message || "分镜生成任务已启动");
+        return;
       }
-    }
 
-    await fetchEpisodes();
-    toast.success("分镜生成完成");
-    setGenerating(false);
-    setGeneratingIndex(-1);
+      setError("分镜任务已启动，但未返回任务编号");
+      setGenerating(false);
+      toast.warning("分镜任务已启动，但未返回任务编号");
+    } catch {
+      setError("分镜生成失败");
+      setGenerating(false);
+      toast.error("分镜生成失败");
+    }
   };
 
   const handleRegenerate = async (episodeNumber: number) => {
@@ -246,7 +268,17 @@ export default function StoryboardPageContent() {
         </div>
 
         {error && (
-          <div className="mb-6 text-sm text-red-400 bg-red-500/10 rounded p-3">{error}</div>
+          <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-sm text-red-400 bg-red-500/10 rounded p-3">
+            <span>{error}</span>
+            <Button
+              variant="outline"
+              onClick={handleGenerateAll}
+              disabled={generating}
+              className="min-h-[40px] border-red-500/30 text-red-300 hover:text-red-200"
+            >
+              重试生成
+            </Button>
+          </div>
         )}
 
         {/* Progress bar */}
@@ -259,7 +291,7 @@ export default function StoryboardPageContent() {
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-emerald-400">
-                  正在生成第 {generatingIndex >= 0 ? generatingIndex + 1 : "?"} / {totalCount} 集分镜
+                  {taskProgressLabel || `正在生成第 ${generatingIndex >= 0 ? generatingIndex + 1 : "?"} / ${totalCount} 集分镜`}
                 </p>
                 <p className="text-xs text-muted-foreground">每张图片需要 10-20 秒</p>
               </div>
@@ -269,7 +301,11 @@ export default function StoryboardPageContent() {
                 ref={progressRef}
                 className="h-full bg-emerald-500 rounded-full transition-all duration-500 ease-out"
                 style={{
-                  width: `${generatingIndex >= 0 ? ((generatingIndex + 1) / totalCount) * 100 : 5}%`,
+                  width: `${activeTask?.progress?.total
+                    ? (activeTask.progress.completed / activeTask.progress.total) * 100
+                    : generatingIndex >= 0
+                      ? ((generatingIndex + 1) / totalCount) * 100
+                      : 5}%`,
                 }}
               />
             </div>

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { dramas, episodes, generationTasks } from "@/lib/db/schema";
+import { dramas, episodes, generationTasks, type Episode } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { generateVoiceover, generateShotVoiceovers } from "@/lib/ai/voiceover-generator";
@@ -9,7 +9,11 @@ import type { Shot } from "@/types/drama";
 import path from "path";
 import { checkCredits, CREDIT_COSTS, requireCreditDeduction } from "@/lib/credits";
 import { getOwnedDrama } from "@/lib/dramas";
-import { completeGenerationTask, failGenerationTask } from "@/lib/generation";
+import {
+  completeGenerationTask,
+  failGenerationTask,
+  updateGenerationTaskProgress,
+} from "@/lib/generation";
 
 export async function POST(request: NextRequest) {
   let taskId: string | null = null;
@@ -157,12 +161,59 @@ export async function POST(request: NextRequest) {
       startedAt: new Date(),
     });
 
+    processVoiceoverGeneration({
+      taskId,
+      dramaId,
+      userId: session.user.id,
+      uploadDir,
+      allEpisodes,
+      totalCredits: totalVoiceoverCredits,
+    }).catch(console.error);
+
+    return NextResponse.json({
+      taskId,
+      message: `正在为 ${allEpisodes.length} 集生成配音，请稍候...`,
+      episodeCount: allEpisodes.length,
+    });
+  } catch (error) {
+    console.error("Voiceover generation failed:", error);
+    if (taskId && dramaId) {
+      await failGenerationTask(
+        taskId,
+        dramaId,
+        error instanceof Error ? error.message : "未知错误"
+      );
+    }
+    return NextResponse.json(
+      { error: `配音生成失败: ${error instanceof Error ? error.message : "未知错误"}` },
+      { status: 500 }
+    );
+  }
+}
+
+type VoiceoverGenerationParams = {
+  taskId: string;
+  dramaId: string;
+  userId: string;
+  uploadDir: string;
+  allEpisodes: Episode[];
+  totalCredits: number;
+};
+
+async function processVoiceoverGeneration({
+  taskId,
+  dramaId,
+  userId,
+  uploadDir,
+  allEpisodes,
+  totalCredits,
+}: VoiceoverGenerationParams) {
+  try {
     const results: { episodeNumber: number; voiceoverUrl: string; duration: number; shotAudios?: unknown[] }[] = [];
 
     for (const episode of allEpisodes) {
       try {
         if (episode.shotData && Array.isArray(episode.shotData)) {
-          // V2: per-shot voiceovers
           const shots = episode.shotData as Shot[];
           const shotAudios = await generateShotVoiceovers(
             shots,
@@ -193,7 +244,6 @@ export async function POST(request: NextRequest) {
             shotAudios,
           });
         } else if (episode.narrationText) {
-          // V1 fallback
           const outputPath = path.join(
             uploadDir,
             "voiceovers",
@@ -220,6 +270,11 @@ export async function POST(request: NextRequest) {
       } catch (err) {
         console.error(`Failed to generate voiceover for episode ${episode.episodeNumber}:`, err);
       }
+
+      await updateGenerationTaskProgress(taskId, {
+        completedCount: results.length,
+        episodeCount: allEpisodes.length,
+      });
     }
 
     const hasGeneratedVoiceover = results.some((result) => result.voiceoverUrl);
@@ -227,29 +282,29 @@ export async function POST(request: NextRequest) {
       throw new Error("未生成任何可用配音");
     }
 
-    // Deduct credits
-    await requireCreditDeduction(session.user.id, "voiceover", totalVoiceoverCredits, dramaId, `生成配音 - 共${allEpisodes.length}集`);
+    await requireCreditDeduction(
+      userId,
+      "voiceover",
+      totalCredits,
+      dramaId,
+      `生成配音 - 共${allEpisodes.length}集`
+    );
 
     await db
       .update(dramas)
       .set({ status: "voiceover_ready", updatedAt: new Date() })
-      .where(eq(dramas.id, drama.id));
+      .where(eq(dramas.id, dramaId));
 
-    await completeGenerationTask(taskId, { results });
-
-    return NextResponse.json({ taskId, results });
+    await completeGenerationTask(taskId, {
+      completedCount: results.length,
+      episodeCount: allEpisodes.length,
+      results,
+    });
   } catch (error) {
-    console.error("Voiceover generation failed:", error);
-    if (taskId && dramaId) {
-      await failGenerationTask(
-        taskId,
-        dramaId,
-        error instanceof Error ? error.message : "未知错误"
-      );
-    }
-    return NextResponse.json(
-      { error: `配音生成失败: ${error instanceof Error ? error.message : "未知错误"}` },
-      { status: 500 }
+    await failGenerationTask(
+      taskId,
+      dramaId,
+      error instanceof Error ? error.message : "未知错误"
     );
   }
 }
