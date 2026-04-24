@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 import { db } from "@/lib/db";
 import { users, userPasswords } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { INITIAL_USER_CREDITS } from "@/lib/constants";
 
 async function verifyPassword(
   email: string,
@@ -92,7 +93,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             id: user.id,
             email: user.email,
             name: user.name,
-            credits: 200,
+            credits: INITIAL_USER_CREDITS,
           });
         }
       } catch (error) {

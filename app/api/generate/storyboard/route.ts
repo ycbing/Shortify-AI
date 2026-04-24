@@ -9,7 +9,9 @@ import { uploadFileToCos, imageCosKey } from "@/lib/ai/cos-storage";
 import path from "path";
 import fs from "fs/promises";
 import type { Shot, Character } from "@/types/drama";
-import { checkCredits, deductCredits, CREDIT_COSTS } from "@/lib/credits";
+import { checkCredits, CREDIT_COSTS, requireCreditDeduction } from "@/lib/credits";
+import { getOwnedDrama } from "@/lib/dramas";
+import { completeGenerationTask, failGenerationTask } from "@/lib/generation";
 
 /**
  * Build appearance-enriched prompt for a shot.
@@ -59,6 +61,8 @@ function buildAppearancePrompt(
 }
 
 export async function POST(request: NextRequest) {
+  let taskId: string | null = null;
+  let dramaId: string | null = null;
   try {
     const session = await auth();
     if (!session?.user?.id) {
@@ -66,10 +70,17 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { dramaId, episodeId } = body;
+    dramaId = body.dramaId;
+    const { episodeId } = body;
 
     if (!dramaId) {
       return NextResponse.json({ error: "缺少 dramaId" }, { status: 400 });
+    }
+
+    const drama = await getOwnedDrama(dramaId, session.user.id);
+
+    if (!drama) {
+      return NextResponse.json({ error: "短剧不存在" }, { status: 404 });
     }
 
     const uploadDir = process.env.UPLOAD_DIR || "./uploads";
@@ -95,15 +106,19 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "剧集不存在" }, { status: 404 });
       }
 
-      const drama = await db.select().from(dramas).where(eq(dramas.id, dramaId)).limit(1);
-      if (!drama.length) {
-        return NextResponse.json({ error: "短剧不存在" }, { status: 404 });
-      }
-
       // V2: shot-based image generation
       if (episode.shotData && Array.isArray(episode.shotData)) {
-        const characters: Character[] = Array.isArray(drama[0].characters) ? drama[0].characters : [];
-        const shotResult = await handleShotStoryboard(episode, drama[0].style, dramaId, uploadDir, characters);
+        const characters: Character[] = Array.isArray(drama.characters) ? drama.characters : [];
+        const shotResult = await handleShotStoryboard(episode, drama.style, dramaId, uploadDir, characters);
+
+        await requireCreditDeduction(
+          session.user.id,
+          "storyboard",
+          undefined,
+          dramaId,
+          `生成分镜 - 第${episode.episodeNumber}集`
+        );
+
         return NextResponse.json(shotResult);
       }
 
@@ -114,7 +129,7 @@ export async function POST(request: NextRequest) {
 
       const sceneDescription = scriptContent?.sceneDescription || episode.narrationText || "cinematic scene";
 
-      const imageUrl = await generateImage(sceneDescription, drama[0].style || "realistic");
+      const imageUrl = await generateImage(sceneDescription, drama.style || "realistic");
 
       await db
         .update(episodes)
@@ -122,7 +137,7 @@ export async function POST(request: NextRequest) {
         .where(eq(episodes.id, episodeId));
 
       // Deduct credits
-      await deductCredits(session.user.id, "storyboard", undefined, dramaId, `生成分镜 - 第${episode.episodeNumber}集`);
+      await requireCreditDeduction(session.user.id, "storyboard", undefined, dramaId, `生成分镜 - 第${episode.episodeNumber}集`);
 
       return NextResponse.json({ episodeId, imageUrl });
     }
@@ -143,12 +158,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const drama = await db.select().from(dramas).where(eq(dramas.id, dramaId)).limit(1);
-    if (!drama.length) {
-      return NextResponse.json({ error: "短剧不存在" }, { status: 404 });
-    }
-
-    const taskId = uuidv4();
+    taskId = uuidv4();
     await db.insert(generationTasks).values({
       id: taskId,
       dramaId,
@@ -164,8 +174,8 @@ export async function POST(request: NextRequest) {
       try {
         // V2: shot-based
         if (episode.shotData && Array.isArray(episode.shotData)) {
-          const characters: Character[] = Array.isArray(drama[0].characters) ? drama[0].characters : [];
-          const result = await handleShotStoryboard(episode, drama[0].style, dramaId, uploadDir, characters);
+          const characters: Character[] = Array.isArray(drama.characters) ? drama.characters : [];
+          const result = await handleShotStoryboard(episode, drama.style, dramaId, uploadDir, characters);
           results.push(result);
           continue;
         }
@@ -178,7 +188,7 @@ export async function POST(request: NextRequest) {
         const sceneDescription =
           scriptContent?.sceneDescription || episode.narrationText || "cinematic scene";
 
-        const imageUrl = await generateImage(sceneDescription, drama[0].style || "realistic");
+        const imageUrl = await generateImage(sceneDescription, drama.style || "realistic");
 
         await db
           .update(episodes)
@@ -204,22 +214,33 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    const hasGeneratedStoryboard = results.some(
+      (result) => result.imageUrl || result.shotImages?.some((shot) => shot.imageUrl)
+    );
+    if (!hasGeneratedStoryboard) {
+      throw new Error("未生成任何可用分镜");
+    }
+
+    // Deduct credits
+    await requireCreditDeduction(session.user.id, "storyboard", totalCredits, dramaId, `生成分镜图片 - 共${allEpisodes.length}集`);
+
     await db
       .update(dramas)
       .set({ status: "storyboard_ready", updatedAt: new Date() })
       .where(eq(dramas.id, dramaId));
 
-    await db
-      .update(generationTasks)
-      .set({ status: "completed", outputData: { results }, completedAt: new Date() })
-      .where(eq(generationTasks.id, taskId));
-
-    // Deduct credits
-    await deductCredits(session.user.id, "storyboard", totalCredits, dramaId, `生成分镜图片 - 共${allEpisodes.length}集`);
+    await completeGenerationTask(taskId, { results });
 
     return NextResponse.json({ taskId, results });
   } catch (error) {
     console.error("Storyboard generation failed:", error);
+    if (taskId && dramaId) {
+      await failGenerationTask(
+        taskId,
+        dramaId,
+        error instanceof Error ? error.message : "未知错误"
+      );
+    }
     return NextResponse.json(
       { error: `分镜生成失败: ${error instanceof Error ? error.message : "未知错误"}` },
       { status: 500 }

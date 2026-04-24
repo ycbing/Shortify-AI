@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { dramas, episodes } from "@/lib/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
+import { getOwnedDrama } from "@/lib/dramas";
+import { PUBLIC_DRAMA_STATUSES } from "@/lib/public-dramas";
 
 export async function GET(
   request: NextRequest,
@@ -16,11 +18,7 @@ export async function GET(
     // For non-completed dramas, require auth and ownership
     let drama;
     if (session?.user?.id) {
-      [drama] = await db
-        .select()
-        .from(dramas)
-        .where(and(eq(dramas.id, dramaId), eq(dramas.userId, session.user.id)))
-        .limit(1);
+      drama = await getOwnedDrama(dramaId, session.user.id);
     }
 
     if (!drama) {
@@ -36,8 +34,7 @@ export async function GET(
       }
 
       // Only allow public access to completed or storyboard_ready+ dramas
-      const publicStatuses = ["completed", "storyboard_ready", "voiceover_ready"];
-      if (!publicStatuses.includes(drama.status || "")) {
+      if (!PUBLIC_DRAMA_STATUSES.has(drama.status || "")) {
         return NextResponse.json({ error: "短剧不存在" }, { status: 404 });
       }
     }
@@ -68,18 +65,19 @@ export async function PUT(
     const { dramaId } = await params;
     const body = await request.json();
 
+    const drama = await getOwnedDrama(dramaId, session.user.id);
+    if (!drama) {
+      return NextResponse.json({ error: "短剧不存在" }, { status: 404 });
+    }
+
     const [updated] = await db
       .update(dramas)
       .set({
         ...body,
         updatedAt: new Date(),
       })
-      .where(and(eq(dramas.id, dramaId), eq(dramas.userId, session.user.id)))
+      .where(eq(dramas.id, dramaId))
       .returning();
-
-    if (!updated) {
-      return NextResponse.json({ error: "短剧不存在" }, { status: 404 });
-    }
 
     return NextResponse.json({ drama: updated });
   } catch (error) {
@@ -100,14 +98,14 @@ export async function DELETE(
 
     const { dramaId } = await params;
 
-    const [deleted] = await db
-      .delete(dramas)
-      .where(and(eq(dramas.id, dramaId), eq(dramas.userId, session.user.id)))
-      .returning();
-
-    if (!deleted) {
+    const drama = await getOwnedDrama(dramaId, session.user.id);
+    if (!drama) {
       return NextResponse.json({ error: "短剧不存在" }, { status: 404 });
     }
+
+    await db
+      .delete(dramas)
+      .where(eq(dramas.id, dramaId));
 
     return NextResponse.json({ message: "删除成功" });
   } catch (error) {

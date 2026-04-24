@@ -12,7 +12,9 @@ import { inferBgmPreset, BGM_VOLUME_MAP } from "@/lib/ai/bgm-library";
 import type { Shot, ShotAudio } from "@/types/drama";
 import path from "path";
 import fs from "fs/promises";
-import { checkCredits, deductCredits, CREDIT_COSTS } from "@/lib/credits";
+import { checkCredits, CREDIT_COSTS, requireCreditDeduction } from "@/lib/credits";
+import { getOwnedDrama } from "@/lib/dramas";
+import { completeGenerationTask, failGenerationTask } from "@/lib/generation";
 
 /**
  * Convert an absolute local path to a relative uploads path for database storage.
@@ -30,6 +32,8 @@ function toDbPath(filePath: string): string {
 }
 
 export async function POST(request: NextRequest) {
+  let taskId: string | null = null;
+  let dramaId: string | null = null;
   try {
     const session = await auth();
     if (!session?.user?.id) {
@@ -37,14 +41,20 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { dramaId, episodeId, useAsr } = body;
+    dramaId = body.dramaId;
+    const { episodeId, useAsr } = body;
 
     if (!dramaId) {
       return NextResponse.json({ error: "缺少 dramaId" }, { status: 400 });
     }
 
+    const drama = await getOwnedDrama(dramaId, session.user.id);
+
+    if (!drama) {
+      return NextResponse.json({ error: "短剧不存在" }, { status: 404 });
+    }
+
     const uploadDir = path.resolve(process.env.UPLOAD_DIR || "./uploads");
-    const relativeUploadDir = process.env.UPLOAD_DIR || "./uploads";
 
     if (episodeId) {
       // Compose single episode
@@ -142,8 +152,7 @@ export async function POST(request: NextRequest) {
         }
 
         // Resolve BGM path
-        const dramaRow = await db.select({ bgmUrl: dramas.bgmUrl, genre: dramas.genre }).from(dramas).where(eq(dramas.id, dramaId)).limit(1);
-        const bgmUrl = dramaRow[0]?.bgmUrl;
+        const bgmUrl = drama.bgmUrl;
         let bgmPath: string | null = null;
         if (bgmUrl) {
           const resolvedBgmPath = path.isAbsolute(bgmUrl) ? bgmUrl : path.join(uploadDir, bgmUrl);
@@ -152,7 +161,7 @@ export async function POST(request: NextRequest) {
             bgmPath = resolvedBgmPath;
           } catch { /* BGM file not found */ }
         }
-        const bgmVolume = bgmUrl ? (BGM_VOLUME_MAP[inferBgmPreset(dramaRow[0]?.genre)] ?? 0.15) : 0.15;
+        const bgmVolume = bgmUrl ? (BGM_VOLUME_MAP[inferBgmPreset(drama.genre)] ?? 0.15) : 0.15;
 
         await composeEpisodeFromShots(
           shots,
@@ -178,7 +187,7 @@ export async function POST(request: NextRequest) {
           .where(eq(episodes.id, episodeId));
 
         // Deduct credits
-        await deductCredits(session.user.id, "compose", undefined, dramaId, `合成视频 - 第${episode.episodeNumber}集`);
+        await requireCreditDeduction(session.user.id, "compose", undefined, dramaId, `合成视频 - 第${episode.episodeNumber}集`);
 
         return NextResponse.json({ episodeId, videoUrl: finalVideoUrl });
       }
@@ -207,7 +216,7 @@ export async function POST(request: NextRequest) {
         .where(eq(episodes.id, episodeId));
 
       // Deduct credits
-      await deductCredits(session.user.id, "compose", undefined, dramaId, `合成视频 - 第${episode.episodeNumber}集`);
+      await requireCreditDeduction(session.user.id, "compose", undefined, dramaId, `合成视频 - 第${episode.episodeNumber}集`);
 
       return NextResponse.json({ episodeId, videoUrl: finalVideoUrlV1 });
     }
@@ -229,7 +238,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const taskId = uuidv4();
+    taskId = uuidv4();
     await db.insert(generationTasks).values({
       id: taskId,
       dramaId,
@@ -242,8 +251,7 @@ export async function POST(request: NextRequest) {
     const videoPaths: string[] = [];
 
     // Resolve BGM for all episodes
-    const dramaRow = await db.select({ bgmUrl: dramas.bgmUrl, genre: dramas.genre }).from(dramas).where(eq(dramas.id, dramaId)).limit(1);
-    const dramaBgmUrl = dramaRow[0]?.bgmUrl;
+    const dramaBgmUrl = drama.bgmUrl;
     let resolvedBgmPath: string | null = null;
     if (dramaBgmUrl) {
       const tryPath = path.isAbsolute(dramaBgmUrl) ? dramaBgmUrl : path.join(uploadDir, dramaBgmUrl);
@@ -252,7 +260,7 @@ export async function POST(request: NextRequest) {
         resolvedBgmPath = tryPath;
       } catch { /* BGM file not found */ }
     }
-    const dramaBgmVolume = dramaBgmUrl ? (BGM_VOLUME_MAP[inferBgmPreset(dramaRow[0]?.genre)] ?? 0.15) : 0.15;
+    const dramaBgmVolume = dramaBgmUrl ? (BGM_VOLUME_MAP[inferBgmPreset(drama.genre)] ?? 0.15) : 0.15;
 
     for (const episode of allEpisodes) {
       try {
@@ -367,20 +375,25 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    if (videoPaths.length === 0) {
+      throw new Error("未生成任何可用视频");
+    }
+
     // Merge all videos
     let mergedUrl: string | null = null;
-    if (videoPaths.length > 0) {
-      const mergedPath = path.join(uploadDir, "videos", `${dramaId}`, "complete.mp4");
-      const localMergedPath = await mergeVideos(videoPaths, mergedPath);
-      const mergedCosKey = `${dramaId}/videos/complete.mp4`;
-      mergedUrl = toDbPath(await uploadFileToCos(localMergedPath, mergedCosKey));
-    }
+    const mergedPath = path.join(uploadDir, "videos", `${dramaId}`, "complete.mp4");
+    const localMergedPath = await mergeVideos(videoPaths, mergedPath);
+    const mergedCosKey = `${dramaId}/videos/complete.mp4`;
+    mergedUrl = toDbPath(await uploadFileToCos(localMergedPath, mergedCosKey));
 
     // Calculate total duration
     const totalDuration = allEpisodes.reduce(
       (sum, ep) => sum + (ep.duration || 0),
       0
     );
+
+    // Deduct credits
+    await requireCreditDeduction(session.user.id, "compose", totalComposeCredits, dramaId, `合成视频 - 共${allEpisodes.length}集`);
 
     await db
       .update(dramas)
@@ -391,17 +404,7 @@ export async function POST(request: NextRequest) {
       })
       .where(eq(dramas.id, dramaId));
 
-    await db
-      .update(generationTasks)
-      .set({
-        status: "completed",
-        outputData: { videoCount: videoPaths.length, mergedUrl },
-        completedAt: new Date(),
-      })
-      .where(eq(generationTasks.id, taskId));
-
-    // Deduct credits
-    await deductCredits(session.user.id, "compose", totalComposeCredits, dramaId, `合成视频 - 共${allEpisodes.length}集`);
+    await completeGenerationTask(taskId, { videoCount: videoPaths.length, mergedUrl });
 
     return NextResponse.json({
       taskId,
@@ -410,6 +413,13 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error("Video composition failed:", error);
+    if (taskId && dramaId) {
+      await failGenerationTask(
+        taskId,
+        dramaId,
+        error instanceof Error ? error.message : "未知错误"
+      );
+    }
     return NextResponse.json(
       { error: `视频合成失败: ${error instanceof Error ? error.message : "未知错误"}` },
       { status: 500 }

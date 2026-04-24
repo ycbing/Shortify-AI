@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { dramas, episodes } from "@/lib/db/schema";
 import { eq, sql } from "drizzle-orm";
+import { PUBLIC_DRAMA_STATUSES } from "@/lib/public-dramas";
 
 /**
  * GET /api/dramas/[dramaId]/share
@@ -22,6 +23,10 @@ export async function GET(
       .limit(1);
 
     if (!drama) {
+      return NextResponse.json({ error: "短剧不存在" }, { status: 404 });
+    }
+
+    if (!PUBLIC_DRAMA_STATUSES.has(drama.status || "")) {
       return NextResponse.json({ error: "短剧不存在" }, { status: 404 });
     }
 

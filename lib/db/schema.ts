@@ -11,13 +11,14 @@ import {
   index,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
+import { INITIAL_USER_CREDITS } from "@/lib/constants";
 
 // Users table
 export const users = pgTable("users", {
   id: text("id").primaryKey(),
   email: text("email").notNull(),
   name: text("name"),
-  credits: integer("credits").default(10),
+  credits: integer("credits").default(INITIAL_USER_CREDITS),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 

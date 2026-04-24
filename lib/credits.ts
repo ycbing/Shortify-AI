@@ -4,7 +4,7 @@
 
 import { db } from "@/lib/db";
 import { users, usageLogs } from "@/lib/db/schema";
-import { eq, sql, desc } from "drizzle-orm";
+import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 
 // Credit costs per operation
@@ -56,34 +56,62 @@ export async function deductCredits(
   description?: string
 ): Promise<{ ok: boolean; balance: number; error?: string }> {
   const cost = amount ?? CREDIT_COSTS[type];
+  try {
+    return await db.transaction(async (tx) => {
+      const [updated] = await tx
+        .update(users)
+        .set({ credits: sql`${users.credits} - ${cost}` })
+        .where(and(eq(users.id, userId), gte(users.credits, cost)))
+        .returning({ credits: users.credits });
 
-  const { ok, balance } = await checkCredits(userId, cost);
-  if (!ok) {
+      if (!updated) {
+        const [user] = await tx
+          .select({ credits: users.credits })
+          .from(users)
+          .where(eq(users.id, userId))
+          .limit(1);
+
+        const balance = user?.credits ?? 0;
+        return {
+          ok: false,
+          balance,
+          error: `积分不足，需要 ${cost} 积分，当前余额 ${balance} 积分`,
+        };
+      }
+
+      await tx.insert(usageLogs).values({
+        id: uuidv4(),
+        userId,
+        type,
+        creditsUsed: cost,
+        dramaId: dramaId || null,
+        description: description || CREDIT_LABELS[type],
+      });
+
+      return { ok: true, balance: updated.credits ?? 0 };
+    });
+  } catch (error) {
+    console.error("Failed to deduct credits:", error);
     return {
       ok: false,
-      balance,
-      error: `积分不足，需要 ${cost} 积分，当前余额 ${balance} 积分`,
+      balance: await getCreditBalance(userId),
+      error: "积分扣减失败，请稍后重试",
     };
   }
+}
 
-  // Deduct in transaction-like fashion (simple update)
-  const [updated] = await db
-    .update(users)
-    .set({ credits: sql`${users.credits} - ${cost}` })
-    .where(eq(users.id, userId))
-    .returning({ credits: users.credits });
-
-  // Log usage
-  await db.insert(usageLogs).values({
-    id: uuidv4(),
-    userId,
-    type,
-    creditsUsed: cost,
-    dramaId: dramaId || null,
-    description: description || CREDIT_LABELS[type],
-  });
-
-  return { ok: true, balance: updated.credits ?? 0 };
+export async function requireCreditDeduction(
+  userId: string,
+  type: CreditType,
+  amount?: number,
+  dramaId?: string,
+  description?: string
+) {
+  const result = await deductCredits(userId, type, amount, dramaId, description);
+  if (!result.ok) {
+    throw new Error(result.error || "积分扣减失败");
+  }
+  return result;
 }
 
 /**

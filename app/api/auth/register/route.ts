@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { db } from "@/lib/db";
 import { users, userPasswords } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { INITIAL_USER_CREDITS } from "@/lib/constants";
 
 export async function POST(request: NextRequest) {
   try {
@@ -45,7 +46,7 @@ export async function POST(request: NextRequest) {
       id: userId,
       email,
       name: name || email.split("@")[0],
-      credits: 200,
+      credits: INITIAL_USER_CREDITS,
     });
 
     await db.insert(userPasswords).values({

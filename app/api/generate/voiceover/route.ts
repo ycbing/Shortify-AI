@@ -7,9 +7,13 @@ import { v4 as uuidv4 } from "uuid";
 import { generateVoiceover, generateShotVoiceovers } from "@/lib/ai/voiceover-generator";
 import type { Shot } from "@/types/drama";
 import path from "path";
-import { checkCredits, deductCredits, CREDIT_COSTS } from "@/lib/credits";
+import { checkCredits, CREDIT_COSTS, requireCreditDeduction } from "@/lib/credits";
+import { getOwnedDrama } from "@/lib/dramas";
+import { completeGenerationTask, failGenerationTask } from "@/lib/generation";
 
 export async function POST(request: NextRequest) {
+  let taskId: string | null = null;
+  let dramaId: string | null = null;
   try {
     const session = await auth();
     if (!session?.user?.id) {
@@ -17,10 +21,17 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { dramaId, episodeId } = body;
+    dramaId = body.dramaId;
+    const { episodeId } = body;
 
     if (!dramaId) {
       return NextResponse.json({ error: "缺少 dramaId" }, { status: 400 });
+    }
+
+    const drama = await getOwnedDrama(dramaId, session.user.id);
+
+    if (!drama) {
+      return NextResponse.json({ error: "短剧不存在" }, { status: 404 });
     }
 
     const uploadDir = process.env.UPLOAD_DIR || "./uploads";
@@ -72,6 +83,14 @@ export async function POST(request: NextRequest) {
           })
           .where(eq(episodes.id, episodeId));
 
+        await requireCreditDeduction(
+          session.user.id,
+          "voiceover",
+          undefined,
+          dramaId,
+          `生成配音 - 第${episode.episodeNumber}集`
+        );
+
         return NextResponse.json({
           episodeId,
           shotAudios,
@@ -102,7 +121,7 @@ export async function POST(request: NextRequest) {
         .where(eq(episodes.id, episodeId));
 
       // Deduct credits
-      await deductCredits(session.user.id, "voiceover", undefined, dramaId, `生成配音 - 第${episode.episodeNumber}集`);
+      await requireCreditDeduction(session.user.id, "voiceover", undefined, dramaId, `生成配音 - 第${episode.episodeNumber}集`);
 
       return NextResponse.json({
         episodeId,
@@ -128,7 +147,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const taskId = uuidv4();
+    taskId = uuidv4();
     await db.insert(generationTasks).values({
       id: taskId,
       dramaId,
@@ -203,22 +222,31 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    const hasGeneratedVoiceover = results.some((result) => result.voiceoverUrl);
+    if (!hasGeneratedVoiceover) {
+      throw new Error("未生成任何可用配音");
+    }
+
+    // Deduct credits
+    await requireCreditDeduction(session.user.id, "voiceover", totalVoiceoverCredits, dramaId, `生成配音 - 共${allEpisodes.length}集`);
+
     await db
       .update(dramas)
       .set({ status: "voiceover_ready", updatedAt: new Date() })
-      .where(eq(dramas.id, dramaId));
+      .where(eq(dramas.id, drama.id));
 
-    await db
-      .update(generationTasks)
-      .set({ status: "completed", outputData: { results }, completedAt: new Date() })
-      .where(eq(generationTasks.id, taskId));
-
-    // Deduct credits
-    await deductCredits(session.user.id, "voiceover", totalVoiceoverCredits, dramaId, `生成配音 - 共${allEpisodes.length}集`);
+    await completeGenerationTask(taskId, { results });
 
     return NextResponse.json({ taskId, results });
   } catch (error) {
     console.error("Voiceover generation failed:", error);
+    if (taskId && dramaId) {
+      await failGenerationTask(
+        taskId,
+        dramaId,
+        error instanceof Error ? error.message : "未知错误"
+      );
+    }
     return NextResponse.json(
       { error: `配音生成失败: ${error instanceof Error ? error.message : "未知错误"}` },
       { status: 500 }

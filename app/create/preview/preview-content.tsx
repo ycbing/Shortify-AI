@@ -59,6 +59,8 @@ export default function PreviewPageContent() {
   const [loadingAction, setLoadingAction] = useState("");
   const [actionProgress, setActionProgress] = useState({ current: 0, total: 0 });
   const [error, setError] = useState("");
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+  const [taskProgressLabel, setTaskProgressLabel] = useState("");
 
   const fetchEpisodes = useCallback(async (showLoading = true) => {
     if (!dramaId) return;
@@ -68,8 +70,8 @@ export default function PreviewPageContent() {
       const res = await fetch(`/api/dramas/${dramaId}`);
       if (res.ok) {
         const data = await res.json();
-        setDramaTitle(data.title || "");
-        setDramaStatus(data.status || "");
+        setDramaTitle(data.drama?.title || "");
+        setDramaStatus(data.drama?.status || "");
         const processedEpisodes = (data.episodes || []).map((ep: EpisodeData) => ({
           ...ep,
           voiceoverUrl: toPublicUrl(ep.voiceoverUrl),
@@ -97,16 +99,94 @@ export default function PreviewPageContent() {
     fetchEpisodes();
   }, [dramaId]);
 
-  // Auto-resume polling if drama is in generating state (e.g. page refresh)
+  const pollTask = useCallback(async (taskId: string) => {
+    setActiveTaskId(taskId);
+    setLoadingAction("video-gen");
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/tasks/${taskId}`);
+        const data = await res.json();
+
+        if (!res.ok) {
+          throw new Error(data.error || "获取任务状态失败");
+        }
+
+        const task = data.task;
+        const progress = task.progress || { completed: 0, total: 0 };
+        setTaskProgressLabel(progress.label || "");
+        setActionProgress({
+          current: progress.completed || 0,
+          total: progress.total || 0,
+        });
+
+        if (task.status === "completed") {
+          setLoadingAction("");
+          setActionProgress({ current: 0, total: 0 });
+          setActiveTaskId(null);
+          setTaskProgressLabel("");
+          await fetchEpisodes(false);
+          toast.success("AI 视频生成完成！");
+          return;
+        }
+
+        if (task.status === "failed") {
+          const errorMessage = task.errorMessage || "AI 视频生成失败";
+          setError(errorMessage);
+          setLoadingAction("");
+          setActionProgress({ current: 0, total: 0 });
+          setActiveTaskId(null);
+          setTaskProgressLabel("");
+          await fetchEpisodes(false);
+          toast.error(errorMessage);
+          return;
+        }
+      } catch (pollError) {
+        const message = pollError instanceof Error ? pollError.message : "任务轮询失败";
+        setError(message);
+        setLoadingAction("");
+        setActionProgress({ current: 0, total: 0 });
+        setActiveTaskId(null);
+        setTaskProgressLabel("");
+        toast.error(message);
+        return;
+      }
+
+      window.setTimeout(poll, 5000);
+    };
+
+    window.setTimeout(poll, 1500);
+  }, [fetchEpisodes]);
+
+  // Auto-resume polling if drama is in generating state
   useEffect(() => {
-    if (!dramaId || !episodes.length) return;
-    // Only resume if drama status is actually "generating"
-    const isGenerating = dramaStatus === "generating";
-    if (isGenerating && loadingAction !== "video-gen") {
-      setLoadingAction("video-gen");
-      pollVideoProgress();
+    if (!dramaId || dramaStatus !== "generating" || loadingAction === "video-gen" || activeTaskId) {
+      return;
     }
-  }, [dramaId, dramaStatus]);
+
+    let cancelled = false;
+
+    const resumeTaskPolling = async () => {
+      try {
+        const res = await fetch(`/api/tasks?dramaId=${dramaId}&type=video&status=processing&latest=1`);
+        const data = await res.json();
+        if (!res.ok || cancelled) return;
+
+        const latestTask = Array.isArray(data.tasks) ? data.tasks[0] : null;
+        if (latestTask?.id) {
+          pollTask(latestTask.id);
+        }
+      } catch {
+        // ignore resume errors
+      }
+    };
+
+    void resumeTaskPolling();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTaskId, dramaId, dramaStatus, loadingAction, pollTask]);
 
   const handleGenerateAllVoiceovers = async () => {
     if (!dramaId) return;
@@ -239,11 +319,19 @@ export default function PreviewPageContent() {
       if (res.ok) {
         const data = await res.json();
         toast.success(data.message || "AI 视频生成已启动");
-        pollVideoProgress();
+        if (data.taskId) {
+          pollTask(data.taskId);
+        } else {
+          setLoadingAction("");
+          setTaskProgressLabel("");
+          toast.warning("任务已启动，但未返回任务编号");
+        }
       } else {
         const errData = await res.json().catch(() => ({}));
         const errMsg = errData.error || "视频生成启动失败";
         setError(errMsg);
+        setLoadingAction("");
+        setTaskProgressLabel("");
         toast.error(errMsg);
         if (errData.code === "INSUFFICIENT_CREDITS") {
           toast.error("积分不足，请前往设置页面充值", { duration: 5000 });
@@ -253,53 +341,8 @@ export default function PreviewPageContent() {
       setError("视频生成失败");
       toast.error("网络错误，请重试");
       setLoadingAction("");
+      setTaskProgressLabel("");
     }
-  };
-
-  const pollVideoProgress = async () => {
-    if (!dramaId) return;
-    const maxAttempts = 60;
-    let attempts = 0;
-
-    const poll = async () => {
-      attempts++;
-      await fetchEpisodes(false);
-
-      // Fetch fresh data to check completion
-      try {
-        const res = await fetch(`/api/dramas/${dramaId}`);
-        if (res.ok) {
-          const data = await res.json();
-          const eps = data.episodes || [];
-          // Count episodes that have videoUrl (AI-generated video)
-          const episodesWithShots = eps.filter((ep: any) => {
-            const shots = Array.isArray(ep.shotData) ? ep.shotData : [];
-            return shots.length > 0;
-          });
-          const completed = episodesWithShots.filter((ep: any) => !!ep.videoUrl).length;
-          setActionProgress({ current: completed, total: episodesWithShots.length });
-
-          const allDone = episodesWithShots.every((ep: any) => !!ep.videoUrl);
-          if (allDone || attempts >= maxAttempts) {
-            setLoadingAction("");
-            setActionProgress({ current: 0, total: 0 });
-            if (allDone) {
-              toast.success("AI 视频生成完成！");
-              await fetchEpisodes(false);
-            } else {
-              toast.warning("AI 视频生成超时，部分集可能未完成");
-            }
-            return;
-          }
-        }
-      } catch {
-        // ignore poll errors
-      }
-
-      setTimeout(poll, 5000);
-    };
-
-    setTimeout(poll, 10000);
   };
 
   if (loading) {
@@ -330,8 +373,9 @@ export default function PreviewPageContent() {
         : "正在合成视频...";
     }
     if (loadingAction === "video-gen") {
+      if (taskProgressLabel) return taskProgressLabel;
       return actionProgress.total > 0
-        ? `AI 视频生成中... (${actionProgress.current}/${actionProgress.total} 集已完成)`
+        ? `AI 视频生成中... (${actionProgress.current}/${actionProgress.total})`
         : "AI 视频生成中...";
     }
     return "处理中...";

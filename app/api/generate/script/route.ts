@@ -7,9 +7,13 @@ import { v4 as uuidv4 } from "uuid";
 import { generateScript, extractNarrationFromShots } from "@/lib/ai/script-generator";
 import { isScriptV2 } from "@/types/drama";
 import type { DramaGenreType, DramaStyleType, GeneratedScriptV2 } from "@/types/drama";
-import { checkCredits, deductCredits, CREDIT_COSTS } from "@/lib/credits";
+import { checkCredits, CREDIT_COSTS, requireCreditDeduction } from "@/lib/credits";
+import { getOwnedDrama } from "@/lib/dramas";
+import { completeGenerationTask, failGenerationTask } from "@/lib/generation";
 
 export async function POST(request: NextRequest) {
+  let taskId: string | null = null;
+  let dramaId: string | null = null;
   try {
     const session = await auth();
     if (!session?.user?.id) {
@@ -26,25 +30,21 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { dramaId } = body;
+    dramaId = body.dramaId;
 
     if (!dramaId) {
       return NextResponse.json({ error: "缺少 dramaId" }, { status: 400 });
     }
 
     // Get drama
-    const [drama] = await db
-      .select()
-      .from(dramas)
-      .where(eq(dramas.id, dramaId))
-      .limit(1);
+    const drama = await getOwnedDrama(dramaId, session.user.id);
 
     if (!drama) {
       return NextResponse.json({ error: "短剧不存在" }, { status: 404 });
     }
 
     // Create generation task
-    const taskId = uuidv4();
+    taskId = uuidv4();
     await db.insert(generationTasks).values({
       id: taskId,
       dramaId,
@@ -68,7 +68,7 @@ export async function POST(request: NextRequest) {
     );
 
     // Deduct credits after successful generation
-    await deductCredits(session.user.id, "script", undefined, dramaId);
+    await requireCreditDeduction(session.user.id, "script", undefined, dramaId);
 
     // Update drama title and characters (V2)
     const updateData: Record<string, unknown> = {
@@ -107,18 +107,18 @@ export async function POST(request: NextRequest) {
     }
 
     // Complete task
-    await db
-      .update(generationTasks)
-      .set({
-        status: "completed",
-        outputData: script as unknown as Record<string, unknown>,
-        completedAt: new Date(),
-      })
-      .where(eq(generationTasks.id, taskId));
+    await completeGenerationTask(taskId, script as unknown as Record<string, unknown>);
 
     return NextResponse.json({ taskId, script });
   } catch (error) {
     console.error("Script generation failed:", error);
+    if (taskId && dramaId) {
+      await failGenerationTask(
+        taskId,
+        dramaId,
+        error instanceof Error ? error.message : "未知错误"
+      );
+    }
     return NextResponse.json(
       { error: `剧本生成失败: ${error instanceof Error ? error.message : "未知错误"}` },
       { status: 500 }

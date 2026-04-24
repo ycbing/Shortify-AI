@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { dramas, episodes } from "@/lib/db/schema";
-import { eq, and } from "drizzle-orm";
+import { episodes } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
 import { getSignedCosUrl, cosKeyFromUrl, isCosUrl } from "@/lib/ai/cos-storage";
 import path from "path";
 import fs from "fs/promises";
+import { getOwnedDrama } from "@/lib/dramas";
 
 export async function POST(
   request: NextRequest,
@@ -19,13 +20,9 @@ export async function POST(
 
     const { dramaId } = await params;
     const body = await request.json();
-    const { format = "full", withSubtitle = true } = body;
+    const { format = "full" } = body;
 
-    const [drama] = await db
-      .select()
-      .from(dramas)
-      .where(and(eq(dramas.id, dramaId), eq(dramas.userId, session.user.id)))
-      .limit(1);
+    const drama = await getOwnedDrama(dramaId, session.user.id);
 
     if (!drama) {
       return NextResponse.json({ error: "短剧不存在" }, { status: 404 });

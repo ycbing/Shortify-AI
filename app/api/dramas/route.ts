@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { dramas, episodes } from "@/lib/db/schema";
-import { eq, desc, and } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 
 export async function GET(request: NextRequest) {
@@ -26,29 +26,37 @@ export async function GET(request: NextRequest) {
       .where(and(...conditions))
       .orderBy(desc(dramas.createdAt));
 
-    // 为每个 drama 附带 episodes
-    const dramasWithEpisodes = await Promise.all(
-      userDramas.map(async (drama) => {
-        const dramaEpisodes = await db
-          .select({
-            id: episodes.id,
-            episodeNumber: episodes.episodeNumber,
-            title: episodes.title,
-            imageUrl: episodes.imageUrl,
-            voiceoverUrl: episodes.voiceoverUrl,
-            videoUrl: episodes.videoUrl,
-            duration: episodes.duration,
-          })
-          .from(episodes)
-          .where(eq(episodes.dramaId, drama.id))
-          .orderBy(episodes.episodeNumber);
+    if (userDramas.length === 0) {
+      return NextResponse.json({ dramas: [] });
+    }
 
-        return {
-          ...drama,
-          episodes: dramaEpisodes,
-        };
+    const dramaIds = userDramas.map((drama) => drama.id);
+    const allEpisodes = await db
+      .select({
+        id: episodes.id,
+        dramaId: episodes.dramaId,
+        episodeNumber: episodes.episodeNumber,
+        title: episodes.title,
+        imageUrl: episodes.imageUrl,
+        voiceoverUrl: episodes.voiceoverUrl,
+        videoUrl: episodes.videoUrl,
+        duration: episodes.duration,
       })
-    );
+      .from(episodes)
+      .where(inArray(episodes.dramaId, dramaIds))
+      .orderBy(episodes.dramaId, episodes.episodeNumber);
+
+    const episodesByDramaId = new Map<string, typeof allEpisodes>();
+    for (const episode of allEpisodes) {
+      const dramaEpisodes = episodesByDramaId.get(episode.dramaId) ?? [];
+      dramaEpisodes.push(episode);
+      episodesByDramaId.set(episode.dramaId, dramaEpisodes);
+    }
+
+    const dramasWithEpisodes = userDramas.map((drama) => ({
+      ...drama,
+      episodes: (episodesByDramaId.get(drama.id) ?? []).map(({ dramaId: _dramaId, ...episode }) => episode),
+    }));
 
     return NextResponse.json({ dramas: dramasWithEpisodes });
   } catch (error) {
