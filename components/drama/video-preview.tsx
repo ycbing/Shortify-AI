@@ -1,8 +1,8 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { Play, Pause, SkipBack, SkipForward, Maximize, FileText } from "lucide-react";
-import { useState, useRef, useEffect } from "react";
+import { Play, Pause, SkipBack, SkipForward, Maximize, FileText, RotateCw } from "lucide-react";
+import { useState, useRef, useEffect, useCallback } from "react";
 
 interface EpisodeData {
   episodeNumber: number;
@@ -29,8 +29,13 @@ function toPublicUrl(localPath: string | null | undefined): string | null {
 export function VideoPreview({ videoUrl, episodes = [], defaultEpisode }: VideoPreviewProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [playing, setPlaying] = useState(false);
   const [currentEpisode, setCurrentEpisode] = useState(defaultEpisode || 0);
+  const [showRotateHint, setShowRotateHint] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showControls, setShowControls] = useState(false);
+  const controlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Sync with external defaultEpisode changes (e.g. from episode list in parent)
   useEffect(() => {
@@ -38,13 +43,43 @@ export function VideoPreview({ videoUrl, episodes = [], defaultEpisode }: VideoP
       setCurrentEpisode(defaultEpisode);
     }
   }, [defaultEpisode]);
-  const containerRef = useRef<HTMLDivElement>(null);
 
   const currentEp = episodes[currentEpisode];
   const currentVideoUrl = currentEp?.videoUrl || videoUrl;
   const currentSubtitleUrl = currentEp?.subtitleUrl
     ? currentEp.subtitleUrl.startsWith("/api/") ? currentEp.subtitleUrl : toPublicUrl(currentEp.subtitleUrl)
     : null;
+
+  // Detect mobile + portrait → show rotate hint
+  useEffect(() => {
+    const checkOrientation = () => {
+      const isMobile = window.innerWidth < 768;
+      const isPortrait = window.innerHeight > window.innerWidth;
+      setShowRotateHint(isMobile && isPortrait && !!currentVideoUrl);
+    };
+    checkOrientation();
+    window.addEventListener("resize", checkOrientation);
+    return () => window.removeEventListener("resize", checkOrientation);
+  }, [currentVideoUrl]);
+
+  // Track fullscreen state
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", onFullscreenChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", onFullscreenChange);
+      document.removeEventListener("webkitfullscreenchange", onFullscreenChange);
+    };
+  }, []);
+
+  const hideControlsDelayed = useCallback(() => {
+    if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
+    setShowControls(true);
+    controlsTimerRef.current = setTimeout(() => setShowControls(false), 3000);
+  }, []);
 
   const handlePlayPause = async () => {
     if (currentVideoUrl && videoRef.current) {
@@ -55,6 +90,7 @@ export function VideoPreview({ videoUrl, episodes = [], defaultEpisode }: VideoP
         try {
           await videoRef.current.play();
           setPlaying(true);
+          hideControlsDelayed();
         } catch {
           // browser autoplay blocked
         }
@@ -85,6 +121,31 @@ export function VideoPreview({ videoUrl, episodes = [], defaultEpisode }: VideoP
     if (currentEpisode < episodes.length - 1) {
       setPlaying(false);
       setCurrentEpisode(currentEpisode + 1);
+    }
+  };
+
+  const toggleFullscreen = async () => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    try {
+      if (!document.fullscreenElement) {
+        // Try to enter landscape fullscreen on mobile
+        if (el.requestFullscreen) {
+          await el.requestFullscreen();
+        } else if ((el as HTMLDivElement & { webkitRequestFullscreen?: () => Promise<void> }).webkitRequestFullscreen) {
+          await (el as HTMLDivElement & { webkitRequestFullscreen: () => Promise<void> }).webkitRequestFullscreen();
+        }
+        // Try to lock to landscape on mobile
+        try {
+          (screen.orientation as ScreenOrientation & { lock?: (orient: string) => Promise<void> }).lock?.("landscape");
+        } catch { /* not supported */ }
+      } else {
+        (screen.orientation as ScreenOrientation & { unlock?: () => void }).unlock?.();
+        await document.exitFullscreen();
+      }
+    } catch {
+      // fullscreen not supported
     }
   };
 
@@ -134,29 +195,24 @@ export function VideoPreview({ videoUrl, episodes = [], defaultEpisode }: VideoP
     return () => { video.onended = null; };
   }, [currentEpisode, episodes.length]);
 
-  const toggleFullscreen = () => {
-    if (!containerRef.current) return;
-    if (!document.fullscreenElement) {
-      containerRef.current.requestFullscreen();
-    } else {
-      document.exitFullscreen();
-    }
-  };
-
   return (
-    <div ref={containerRef} className="border border-border/50 rounded-lg overflow-hidden bg-black">
+    <div ref={containerRef} className="border border-border/50 rounded-lg overflow-hidden bg-black relative">
       {/* Hidden elements for ref-based control */}
       <audio ref={audioRef} />
 
       {/* Video or slideshow display — full width on mobile */}
-      <div className="aspect-video relative bg-muted flex items-center justify-center">
+      <div
+        className="aspect-video relative bg-muted flex items-center justify-center"
+        onClick={currentVideoUrl ? handlePlayPause : undefined}
+      >
         {currentVideoUrl ? (
           <video
             ref={videoRef}
             src={currentVideoUrl}
             className="w-full h-full object-contain"
             playsInline
-            controls
+            controls={!isFullscreen}
+            controlsList="nodownload"
           >
             {currentSubtitleUrl && (
               <track
@@ -181,6 +237,70 @@ export function VideoPreview({ videoUrl, episodes = [], defaultEpisode }: VideoP
           </div>
         )}
 
+        {/* Play/Pause overlay for video (tap to toggle) */}
+        {currentVideoUrl && !playing && !isFullscreen && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-black/40 backdrop-blur-sm flex items-center justify-center">
+              <Play className="h-8 w-8 sm:h-10 sm:w-10 text-white ml-1" />
+            </div>
+          </div>
+        )}
+
+        {/* Fullscreen controls overlay */}
+        {currentVideoUrl && isFullscreen && (
+          <>
+            <div
+              className="absolute inset-0 flex items-center justify-center z-10"
+              onClick={handlePlayPause}
+            >
+              {!playing && (
+                <div className="w-20 h-20 rounded-full bg-black/40 backdrop-blur-sm flex items-center justify-center">
+                  <Play className="h-10 w-10 text-white ml-1" />
+                </div>
+              )}
+            </div>
+            {/* Bottom control bar */}
+            <div className="absolute bottom-0 left-0 right-0 z-20 bg-gradient-to-t from-black/80 to-transparent p-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handlePrev}
+                  disabled={currentEpisode === 0}
+                  className="text-white hover:text-white min-h-[48px] min-w-[48px]"
+                >
+                  <SkipBack className="h-6 w-6" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handlePlayPause}
+                  className="text-white hover:text-white min-h-[48px] min-w-[48px]"
+                >
+                  {playing ? <Pause className="h-6 w-6" /> : <Play className="h-6 w-6" />}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleNext}
+                  disabled={currentEpisode === episodes.length - 1}
+                  className="text-white hover:text-white min-h-[48px] min-w-[48px]"
+                >
+                  <SkipForward className="h-6 w-6" />
+                </Button>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={toggleFullscreen}
+                className="text-white hover:text-white min-h-[48px] min-w-[48px]"
+              >
+                <Maximize className="h-5 w-5" />
+              </Button>
+            </div>
+          </>
+        )}
+
         {/* Episode indicator */}
         {episodes.length > 1 && (
           <div className="absolute bottom-2 right-2 text-xs text-white/70 bg-black/50 px-2 py-1 rounded">
@@ -202,9 +322,21 @@ export function VideoPreview({ videoUrl, episodes = [], defaultEpisode }: VideoP
             字幕
           </div>
         )}
+
+        {/* Landscape rotation hint for mobile */}
+        {showRotateHint && !isFullscreen && (
+          <div
+            className="absolute inset-0 z-30 bg-black/70 backdrop-blur-sm flex flex-col items-center justify-center gap-3 cursor-pointer"
+            onClick={toggleFullscreen}
+          >
+            <RotateCw className="h-10 w-10 text-white/80 animate-[spin_3s_linear_infinite]" />
+            <p className="text-sm text-white/90 font-medium">横屏观看体验更佳</p>
+            <p className="text-xs text-white/60">点击全屏播放</p>
+          </div>
+        )}
       </div>
 
-      {/* Custom controls — larger touch targets on mobile */}
+      {/* Custom controls — slideshow mode (no native video) */}
       {!currentVideoUrl && (
         <div className="flex items-center justify-center gap-1 sm:gap-2 p-2 sm:p-3 bg-card">
           <Button
