@@ -137,7 +137,7 @@ export default function HomePage() {
         <div className="mx-auto max-w-2xl text-center">
           <h2 className="text-xl sm:text-3xl font-bold mb-3 sm:mb-4">准备好开始了吗？</h2>
           <p className="text-sm sm:text-base text-muted-foreground mb-6 sm:mb-8">
-            注册即送 10 个积分，免费体验 AI 短剧创作
+            注册即送 200 个积分，免费体验 AI 短剧创作
           </p>
           <Link href="/sign-up">
             <Button size="lg" className="bg-emerald-600 hover:bg-emerald-500 text-base px-8 min-h-[44px]">
