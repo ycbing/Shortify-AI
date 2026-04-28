@@ -20,7 +20,7 @@ export async function generateImage(
   const stylePrompt = getStyleImagePrompt(style as "realistic" | "anime" | "ink" | "cyberpunk");
   const fullPrompt = `${prompt}。画面风格：${stylePrompt}。宽屏16:9构图，电影感画面，专业摄影级别。`;
 
-  const model = process.env.IMAGE_MODEL || "cogview-3-plus";
+  const model = process.env.IMAGE_MODEL || "glm-image";
 
   // 1728x960: 16:9 比例, 均为16倍数, 像素数 1,658,880 < 2^21
   const imageSize = model.startsWith("glm-image") ? "1728x960" : size;
