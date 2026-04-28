@@ -25,31 +25,51 @@ export async function generateImage(
   // 1728x960: 16:9 比例, 均为16倍数, 像素数 1,658,880 < 2^21
   const imageSize = model.startsWith("glm-image") ? "1728x960" : size;
 
-  const response = await fetch(`${COGVIEW_BASE_URL}/images/generations`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${GLM_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model,
-      prompt: fullPrompt,
-      size: imageSize,
-    }),
-  });
+  // Retry logic: on content filter (1301), simplify prompt and retry once
+  let lastError = "";
+  const attempts = [fullPrompt];
 
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`CogView API error: ${response.status} - ${error}`);
+  // If prompt is long, also try a simplified version
+  if (fullPrompt.length > 80) {
+    const simplified = prompt.substring(0, 80) + `。${stylePrompt}。宽屏16:9构图。`;
+    attempts.push(simplified);
   }
 
-  const result: CogViewResponse = await response.json();
+  for (const attemptPrompt of attempts) {
+    const response = await fetch(`${COGVIEW_BASE_URL}/images/generations`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${GLM_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model,
+        prompt: attemptPrompt,
+        size: imageSize,
+      }),
+    });
 
-  if (!result.data?.[0]?.url) {
-    throw new Error("No image URL returned from CogView");
+    if (response.ok) {
+      const result: CogViewResponse = await response.json();
+      if (!result.data?.[0]?.url) {
+        throw new Error("No image URL returned from CogView");
+      }
+      return result.data[0].url;
+    }
+
+    const errorText = await response.text();
+    lastError = errorText;
+
+    // If content filter (1301) and we have more attempts, continue
+    if (response.status === 400 && errorText.includes("1301") && attemptPrompt !== attempts[attempts.length - 1]) {
+      console.log(`Content filter triggered, retrying with simplified prompt...`);
+      continue;
+    }
+
+    throw new Error(`CogView API error: ${response.status} - ${errorText}`);
   }
 
-  return result.data[0].url;
+  throw new Error(`CogView API error: ${lastError}`);
 }
 
 export async function downloadImage(
