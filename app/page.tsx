@@ -30,9 +30,9 @@ const features = [
 ];
 
 const templates = [
-  { title: "深夜加班", genre: "悬疑", emoji: "🔍", desc: "程序员发现公司AI有了自我意识" },
-  { title: "校园回忆", genre: "爱情", emoji: "💕", desc: "十年后的同学会上意外重逢" },
-  { title: "合租奇遇", genre: "喜剧", emoji: "😂", desc: "性格迥异的四个人的爆笑生活" },
+  { title: "深夜加班", genre: "mystery", genreLabel: "悬疑", style: "cyberpunk", styleLabel: "赛博朋克", theme: "程序员发现公司AI有了自我意识", emoji: "🔍", desc: "程序员发现公司AI有了自我意识" },
+  { title: "校园回忆", genre: "romance", genreLabel: "爱情", style: "anime", styleLabel: "动漫", theme: "十年后的同学会上意外重逢", emoji: "💕", desc: "十年后的同学会上意外重逢" },
+  { title: "合租奇遇", genre: "comedy", genreLabel: "喜剧", style: "realistic", styleLabel: "写实", theme: "性格迥异的四个人的爆笑生活", emoji: "😂", desc: "性格迥异的四个人的爆笑生活" },
 ];
 
 export default function HomePage() {
@@ -119,12 +119,12 @@ export default function HomePage() {
             {templates.map((t) => (
               <Link
                 key={t.title}
-                href="/create"
+                href={`/create?theme=${encodeURIComponent(t.theme)}&genre=${t.genre}&style=${t.style}`}
                 className="border border-border/50 rounded-xl p-4 sm:p-5 bg-card/30 hover:border-emerald-500/30 hover:bg-card/50 transition-all group cursor-pointer"
               >
                 <span className="text-2xl sm:text-3xl mb-2 sm:mb-3 block">{t.emoji}</span>
                 <h3 className="font-semibold text-sm sm:text-base mb-1">{t.title}</h3>
-                <p className="text-xs sm:text-sm text-emerald-400 mb-1 sm:mb-2">{t.genre}</p>
+                <p className="text-xs sm:text-sm text-emerald-400 mb-1 sm:mb-2">{t.genreLabel}</p>
                 <p className="text-xs sm:text-sm text-muted-foreground">{t.desc}</p>
               </Link>
             ))}

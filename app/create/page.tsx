@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { ThemeInput } from "@/components/create/theme-input";
 import { StyleSelector } from "@/components/create/style-selector";
@@ -19,7 +19,16 @@ const steps = [
 ];
 
 export default function CreatePage() {
+  return (
+    <Suspense>
+      <CreatePageContent />
+    </Suspense>
+  );
+}
+
+function CreatePageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [theme, setTheme] = useState("");
   const [genre, setGenre] = useState<DramaGenreType | "">("");
   const [style, setStyle] = useState<DramaStyleType | "">("");
@@ -27,6 +36,16 @@ export default function CreatePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [bgmFile, setBgmFile] = useState<File | null>(null);
+
+  // Pre-fill from URL params (template links)
+  useEffect(() => {
+    const pTheme = searchParams.get("theme");
+    const pGenre = searchParams.get("genre");
+    const pStyle = searchParams.get("style");
+    if (pTheme) setTheme(pTheme);
+    if (pGenre) setGenre(pGenre as DramaGenreType);
+    if (pStyle) setStyle(pStyle as DramaStyleType);
+  }, [searchParams]);
 
   const canSubmit = theme.trim().length > 0 && genre !== "" && style !== "";
 
