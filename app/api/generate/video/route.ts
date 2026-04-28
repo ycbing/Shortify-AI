@@ -23,6 +23,7 @@ import { checkCredits, CREDIT_COSTS, requireCreditDeduction } from "@/lib/credit
 import { execSync, exec } from "child_process";
 import { promisify } from "util";
 import { getOwnedDrama } from "@/lib/dramas";
+import { updateDramaStatus } from "@/lib/drama-status";
 import {
   completeGenerationTask,
   createOrReuseGenerationTask,

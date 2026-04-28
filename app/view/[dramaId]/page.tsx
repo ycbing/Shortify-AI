@@ -26,7 +26,7 @@ import {
   QrCode,
 } from "lucide-react";
 import Link from "next/link";
-import { DRAMA_STATUS_META, getDramaEditorPath } from "@/lib/drama-status";
+import { DRAMA_STATUS_META, getDramaEditorPath } from "@/lib/drama-status-client";
 
 interface DramaData {
   id: string;

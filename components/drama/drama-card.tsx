@@ -10,7 +10,7 @@ import {
   DRAMA_PROGRESS_STEPS,
   DRAMA_STATUS_META,
   getCompletedDramaSteps,
-} from "@/lib/drama-status";
+} from "@/lib/drama-status-client";
 
 interface DramaCardProps {
   drama: DramaWithEpisodes;

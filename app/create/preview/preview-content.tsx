@@ -524,7 +524,7 @@ export default function PreviewPageContent() {
     return type;
   };
 
-  const getPresentationToneClasses = (tone?: TaskSummary["presentation"]["statusTone"]) => {
+  const getPresentationToneClasses = (tone?: "neutral" | "warning" | "success" | "danger") => {
     if (tone === "success") return "bg-emerald-500/10 text-emerald-400 border-emerald-500/30";
     if (tone === "danger") return "bg-red-500/10 text-red-400 border-red-500/30";
     if (tone === "neutral") return "bg-zinc-500/10 text-zinc-300 border-zinc-500/30";

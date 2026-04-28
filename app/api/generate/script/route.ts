@@ -108,7 +108,7 @@ export async function POST(request: NextRequest) {
       const narrationText = extractNarrationFromShots(v2Ep.shots);
 
       await db.insert(episodes).values({
-        id: uuidv4(),
+        id: crypto.randomUUID(),
         dramaId,
         episodeNumber: ep.episodeNumber,
         title: ep.title,

@@ -12,7 +12,7 @@ import {
   DRAMA_STATUS_META,
   getDramaEditorPath,
   getCompletedDramaSteps,
-} from "@/lib/drama-status";
+} from "@/lib/drama-status-client";
 import {
   Dialog,
   DialogContent,
@@ -319,7 +319,7 @@ function DramaCardWithActions({ drama, onDelete, onCopy, copying }: DramaCardPro
       </Link>
 
       <div className="p-3 sm:p-4">
-        <Link href={dramaCompleted ? getViewUrl() : getEditorUrl()}>
+        <Link href={dramaCompleted ? getViewUrl() : editorUrl}>
           <h3 className="font-semibold text-sm truncate mb-1 hover:text-emerald-400 transition">{drama.title}</h3>
         </Link>
         <div className="flex items-center justify-between text-xs text-muted-foreground mb-2">
@@ -359,7 +359,7 @@ function DramaCardWithActions({ drama, onDelete, onCopy, copying }: DramaCardPro
 
         {/* Action buttons */}
         <div className="flex items-center gap-2">
-          <Link href={getEditorUrl()} className="flex-1">
+          <Link href={editorUrl} className="flex-1">
             <Button
               variant="outline"
               size="sm"
