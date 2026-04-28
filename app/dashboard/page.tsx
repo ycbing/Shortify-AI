@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Plus, Loader2, Trash2, Copy, Pencil, Film, Check, Settings } from "lucide-react";
 import { GeneratingProgressBadge } from "@/components/drama/generating-progress-badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import type { DramaWithEpisodes } from "@/types/drama";
 import {
   DRAMA_PROGRESS_STEPS,
@@ -94,8 +95,35 @@ export default function DashboardPage() {
 
   if (status === "loading" || loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-emerald-400" />
+      <div className="min-h-screen bg-background">
+        <header className="border-b border-border/50 bg-background/80 backdrop-blur-xl sticky top-0 z-40">
+          <div className="mx-auto max-w-7xl flex items-center justify-between px-4 h-14 sm:h-16">
+            <Skeleton className="h-6 w-32" />
+            <div className="flex gap-2">
+              <Skeleton className="h-9 w-16" />
+              <Skeleton className="h-9 w-24" />
+            </div>
+          </div>
+        </header>
+        <main className="mx-auto max-w-7xl px-4 py-4 sm:py-6">
+          <div className="flex gap-2 mb-6">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-9 w-16 rounded-lg" />
+            ))}
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <div key={i} className="border border-border/50 rounded-xl overflow-hidden">
+                <Skeleton className="aspect-video w-full" />
+                <div className="p-3 sm:p-4 space-y-2">
+                  <Skeleton className="h-4 w-3/4" />
+                  <Skeleton className="h-3 w-1/2" />
+                  <Skeleton className="h-3 w-full" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </main>
       </div>
     );
   }

@@ -26,6 +26,7 @@ import {
   QrCode,
 } from "lucide-react";
 import Link from "next/link";
+import { Skeleton } from "@/components/ui/skeleton";
 import { DRAMA_STATUS_META, getDramaEditorPath } from "@/lib/drama-status-client";
 
 interface DramaData {
@@ -178,8 +179,30 @@ export default function ViewDramaPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-emerald-400" />
+      <div className="min-h-screen bg-background">
+        <header className="border-b border-border/50 bg-background/80 backdrop-blur-xl sticky top-0 z-40">
+          <div className="mx-auto max-w-5xl flex items-center justify-between px-4 h-16">
+            <Skeleton className="h-9 w-24" />
+            <div className="flex gap-2">
+              <Skeleton className="h-9 w-20" />
+              <Skeleton className="h-9 w-20" />
+              <Skeleton className="h-9 w-20" />
+            </div>
+          </div>
+        </header>
+        <main className="mx-auto max-w-5xl px-4 py-6">
+          <Skeleton className="h-8 w-64 mb-2" />
+          <Skeleton className="h-4 w-96 mb-6" />
+          <Skeleton className="aspect-video w-full rounded-lg mb-6" />
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="space-y-2">
+                <Skeleton className="aspect-video w-full rounded-lg" />
+                <Skeleton className="h-4 w-3/4" />
+              </div>
+            ))}
+          </div>
+        </main>
       </div>
     );
   }
