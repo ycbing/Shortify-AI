@@ -6,6 +6,7 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Plus, Loader2, Trash2, Copy, Pencil, Film, Check, Settings } from "lucide-react";
+import { GeneratingProgressBadge } from "@/components/drama/generating-progress-badge";
 import type { DramaWithEpisodes } from "@/types/drama";
 import {
   DRAMA_PROGRESS_STEPS,
@@ -356,6 +357,12 @@ function DramaCardWithActions({ drama, onDelete, onCopy, copying }: DramaCardPro
             })}
           </div>
         )}
+
+        {drama.status === "generating" ? (
+          <div className="mb-3">
+            <GeneratingProgressBadge dramaId={drama.id} />
+          </div>
+        ) : null}
 
         {/* Action buttons */}
         <div className="flex items-center gap-2">
