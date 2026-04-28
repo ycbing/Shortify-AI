@@ -384,8 +384,7 @@ async function handleShotStoryboard(
 
       const imageUrl = await generateImage(
         enrichedPrompt,
-        style || "realistic",
-        "1920x1080"
+        style || "realistic"
       );
 
       // Download image to local storage
