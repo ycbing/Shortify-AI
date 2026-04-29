@@ -23,71 +23,107 @@ export async function generateImage(
   const stylePrompt = getStyleImagePrompt(style as "realistic" | "anime" | "ink" | "cyberpunk");
   const fullPrompt = `${prompt}。画面风格：${stylePrompt}。宽屏16:9构图，电影感画面，专业摄影级别。`;
 
-  const model = process.env.IMAGE_MODEL || "glm-image";
+  const model = process.env.IMAGE_MODEL || "cogview-3-flash";
 
-  // 1728x960: 16:9 比例, 均为16倍数, 像素数 1,658,880 < 2^21
-  const imageSize = model.startsWith("glm-image") ? "1728x960" : size;
+  // 1280x720: safe default for cogview models
+  const imageSize = model.includes("cogview-3-flash") ? "1280x720" : size;
 
-  // Retry logic: on content filter (1301), simplify prompt and retry once
+  // Content filter (1301) fallback strategy:
+  // Progressive prompt sanitization to bypass content filter
+  const attempts: { prompt: string; label: string }[] = [
+    { prompt: fullPrompt, label: "full" },
+    // Attempt 2: Simplified description only
+    {
+      prompt: prompt.substring(0, 80) + `。${stylePrompt}。宽屏16:9构图。`,
+      label: "simplified",
+    },
+    // Attempt 3: Strip all visual descriptors, keep only style + safe composition
+    {
+      prompt: `人物场景，${stylePrompt}，电影感画面构图，柔和光线，温馨氛围。`,
+      label: "generic-safe",
+    },
+    // Attempt 4: Ultra-safe generic landscape/portrait
+    {
+      prompt: `美丽的城市街道场景，${stylePrompt}，电影感画面，16:9构图。`,
+      label: "ultra-safe",
+    },
+  ];
+
   let lastError = "";
-  const attempts = [fullPrompt];
 
-  // If prompt is long, also try a simplified version
-  if (fullPrompt.length > 80) {
-    const simplified = prompt.substring(0, 80) + `。${stylePrompt}。宽屏16:9构图。`;
-    attempts.push(simplified);
-  }
+  for (let i = 0; i < attempts.length; i++) {
+    const { prompt: attemptPrompt, label } = attempts[i];
 
-  for (const attemptPrompt of attempts) {
-    const response = await withRetry(
-      () =>
-        fetch(`${COGVIEW_BASE_URL}/images/generations`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${GLM_API_KEY}`,
-          },
-          body: JSON.stringify({
-            model,
-            prompt: attemptPrompt,
-            size: imageSize,
+    try {
+      const response = await withRetry(
+        () =>
+          fetch(`${COGVIEW_BASE_URL}/images/generations`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${GLM_API_KEY}`,
+            },
+            body: JSON.stringify({
+              model,
+              prompt: attemptPrompt,
+              size: imageSize,
+            }),
           }),
-        }),
-      {
-        maxRetries: 3,
-        baseDelayMs: 3000,
-        noRetryOn: ["余额不足", "insufficient"],
-        onRetry: (attempt, err, delayMs) => {
-          log.warn(`Image generation retry ${attempt} after ${Math.round(delayMs)}ms`, {
-            model,
-            prompt: attemptPrompt.substring(0, 50),
-            error: err.message,
+        {
+          maxRetries: 3,
+          baseDelayMs: 3000,
+          noRetryOn: ["余额不足", "insufficient"],
+          onRetry: (attempt, err, delayMs) => {
+            log.warn(`Image generation retry ${attempt} after ${Math.round(delayMs)}ms`, {
+              model,
+              label,
+              prompt: attemptPrompt.substring(0, 50),
+              error: err.message,
+            });
+          },
+        }
+      );
+
+      if (response.ok) {
+        const result: CogViewResponse = await response.json();
+        if (!result.data?.[0]?.url) {
+          throw new Error("No image URL returned from CogView");
+        }
+        if (i > 0) {
+          log.warn(`Content filter bypassed with ${label} prompt (attempt ${i + 1})`, {
+            originalPrompt: prompt.substring(0, 50),
           });
-        },
+        }
+        return result.data[0].url;
       }
-    );
 
-    if (response.ok) {
-      const result: CogViewResponse = await response.json();
-      if (!result.data?.[0]?.url) {
-        throw new Error("No image URL returned from CogView");
+      const errorText = await response.text();
+      lastError = errorText;
+
+      // If content filter (1301), try next prompt variant
+      if (response.status === 400 && errorText.includes("1301")) {
+        log.warn(`Content filter triggered on ${label} prompt, trying next variant...`, {
+          attempt: i + 1,
+          prompt: attemptPrompt.substring(0, 60),
+        });
+        continue;
       }
-      return result.data[0].url;
+
+      // Other errors — don't try more content filter variants
+      throw new Error(`CogView API error: ${response.status} - ${errorText}`);
+    } catch (err) {
+      // Only continue to next variant for content filter errors
+      const isContentFilter = err instanceof Error && (err.message.includes("1301") || err.message.includes("内容审核"));
+      if (isContentFilter && i < attempts.length - 1) {
+        lastError = err.message;
+        log.warn(`Content filter on ${label} prompt, trying next variant...`);
+        continue;
+      }
+      throw err;
     }
-
-    const errorText = await response.text();
-    lastError = errorText;
-
-    // If content filter (1301) and we have more attempts, continue
-    if (response.status === 400 && errorText.includes("1301") && attemptPrompt !== attempts[attempts.length - 1]) {
-      log.warn("Content filter triggered, retrying with simplified prompt...");
-      continue;
-    }
-
-    throw new Error(`CogView API error: ${response.status} - ${errorText}`);
   }
 
-  throw new Error(`CogView API error: ${lastError}`);
+  throw new Error(`CogView 内容审核拦截，所有去敏尝试均失败: ${lastError.substring(0, 200)}`);
 }
 
 export async function downloadImage(
