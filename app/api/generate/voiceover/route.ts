@@ -6,7 +6,7 @@ import { eq, and } from "drizzle-orm";
 import { generateVoiceover, generateShotVoiceovers } from "@/lib/ai/voiceover-generator";
 import type { Shot } from "@/types/drama";
 import path from "path";
-import { checkCredits, CREDIT_COSTS, requireCreditDeduction } from "@/lib/credits";
+import { checkCredits, CREDIT_COSTS, requireCreditDeduction, refundCredits } from "@/lib/credits";
 import { getOwnedDrama } from "@/lib/dramas";
 import { updateDramaStatus } from "@/lib/drama-status";
 import {
@@ -19,6 +19,10 @@ import {
   throwIfGenerationTaskCancelled,
   updateGenerationTaskProgress,
 } from "@/lib/generation";
+import { tryAcquireUserSlot, releaseUserSlot, getUserActiveCount } from "@/lib/resilience";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("voiceover-api");
 
 export async function POST(request: NextRequest) {
   let taskId: string | null = null;
@@ -156,6 +160,14 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    // Concurrency control
+    if (!tryAcquireUserSlot(session.user.id)) {
+      return NextResponse.json({
+        error: `当前有 ${getUserActiveCount(session.user.id)} 个任务正在进行，请等待完成后再试`,
+        code: "TOO_MANY_TASKS",
+      }, { status: 429 });
+    }
+
     const totalVoiceoverCredits = allEpisodes.length * CREDIT_COSTS.voiceover;
     const voiceCreditCheck = await checkCredits(session.user.id, totalVoiceoverCredits);
     if (!voiceCreditCheck.ok) {
@@ -178,7 +190,7 @@ export async function POST(request: NextRequest) {
       userId: session.user.id,
       uploadDir,
       allEpisodes,
-    }).catch(console.error);
+    }).catch(console.error).finally(() => releaseUserSlot(session.user.id));
 
     return NextResponse.json({
       taskId,
@@ -216,10 +228,10 @@ async function processVoiceoverGeneration({
   uploadDir,
   allEpisodes,
 }: VoiceoverGenerationParams) {
-  try {
-    const results: { episodeNumber: number; voiceoverUrl: string; duration: number; shotAudios?: unknown[] }[] = [];
-    let creditsUsed = 0;
+  const results: { episodeNumber: number; voiceoverUrl: string; duration: number; shotAudios?: unknown[] }[] = [];
+  let creditsUsed = 0;
 
+  try {
     for (const episode of allEpisodes) {
       await throwIfGenerationTaskCancelled(taskId);
 
@@ -336,6 +348,12 @@ async function processVoiceoverGeneration({
   } catch (error) {
     if (error instanceof GenerationTaskCancelledError) {
       return;
+    }
+
+    // Refund credits if nothing was generated
+    if (creditsUsed > 0 && !results.some((r) => r.voiceoverUrl)) {
+      log.warn(`No voiceover generated, refunding ${creditsUsed} credits`, { dramaId, taskId });
+      await refundCredits(userId, creditsUsed, dramaId, "配音生成失败 - 积分退还").catch(console.error);
     }
 
     await failGenerationTask(

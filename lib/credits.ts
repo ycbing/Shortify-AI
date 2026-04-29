@@ -100,6 +100,37 @@ export async function deductCredits(
   }
 }
 
+/**
+ * Refund credits to user (e.g., when generation completely fails after partial deduction).
+ */
+export async function refundCredits(
+  userId: string,
+  amount: number,
+ dramaId?: string,
+  description?: string
+): Promise<void> {
+  if (amount <= 0) return;
+
+  await db.transaction(async (tx) => {
+    const [updated] = await tx
+      .update(users)
+      .set({ credits: sql`${users.credits} + ${amount}` })
+      .where(eq(users.id, userId))
+      .returning({ credits: users.credits });
+
+    if (updated) {
+      await tx.insert(usageLogs).values({
+        id: uuidv4(),
+        userId,
+        type: "script" as CreditType, // placeholder, actual type stored in description
+        creditsUsed: -amount, // negative = refund
+        dramaId: dramaId || null,
+        description: description || `积分退还 (${amount})`,
+      });
+    }
+  });
+}
+
 export async function requireCreditDeduction(
   userId: string,
   type: CreditType,

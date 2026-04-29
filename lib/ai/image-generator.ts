@@ -1,5 +1,8 @@
 import { getStyleImagePrompt } from "./script-generator";
+import { withRetry } from "@/lib/resilience";
+import { createLogger } from "@/lib/logger";
 
+const log = createLogger("image-generator");
 const COGVIEW_BASE_URL =
   process.env.GLM_BASE_URL || "https://open.bigmodel.cn/api/paas/v4";
 const GLM_API_KEY = process.env.GLM_API_KEY || "";
@@ -36,18 +39,33 @@ export async function generateImage(
   }
 
   for (const attemptPrompt of attempts) {
-    const response = await fetch(`${COGVIEW_BASE_URL}/images/generations`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${GLM_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model,
-        prompt: attemptPrompt,
-        size: imageSize,
-      }),
-    });
+    const response = await withRetry(
+      () =>
+        fetch(`${COGVIEW_BASE_URL}/images/generations`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${GLM_API_KEY}`,
+          },
+          body: JSON.stringify({
+            model,
+            prompt: attemptPrompt,
+            size: imageSize,
+          }),
+        }),
+      {
+        maxRetries: 3,
+        baseDelayMs: 3000,
+        noRetryOn: ["余额不足", "insufficient"],
+        onRetry: (attempt, err, delayMs) => {
+          log.warn(`Image generation retry ${attempt} after ${Math.round(delayMs)}ms`, {
+            model,
+            prompt: attemptPrompt.substring(0, 50),
+            error: err.message,
+          });
+        },
+      }
+    );
 
     if (response.ok) {
       const result: CogViewResponse = await response.json();
@@ -62,7 +80,7 @@ export async function generateImage(
 
     // If content filter (1301) and we have more attempts, continue
     if (response.status === 400 && errorText.includes("1301") && attemptPrompt !== attempts[attempts.length - 1]) {
-      console.log(`Content filter triggered, retrying with simplified prompt...`);
+      log.warn("Content filter triggered, retrying with simplified prompt...");
       continue;
     }
 

@@ -19,7 +19,7 @@ import {
 import type { Shot } from "@/types/drama";
 import path from "path";
 import fs from "fs/promises";
-import { checkCredits, CREDIT_COSTS, requireCreditDeduction } from "@/lib/credits";
+import { checkCredits, CREDIT_COSTS, requireCreditDeduction, refundCredits } from "@/lib/credits";
 import { execSync, exec } from "child_process";
 import { promisify } from "util";
 import { getOwnedDrama } from "@/lib/dramas";
@@ -34,6 +34,10 @@ import {
   touchGenerationTaskHeartbeat,
   updateGenerationTaskProgress,
 } from "@/lib/generation";
+import { tryAcquireUserSlot, releaseUserSlot, getUserActiveCount } from "@/lib/resilience";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("video-api");
 
 const execAsync = promisify(exec);
 
@@ -113,6 +117,14 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    // Concurrency control
+    if (!tryAcquireUserSlot(session.user.id)) {
+      return NextResponse.json({
+        error: `当前有 ${getUserActiveCount(session.user.id)} 个任务正在进行，请等待完成后再试`,
+        code: "TOO_MANY_TASKS",
+      }, { status: 429 });
+    }
+
     // Credit check: 20 credits per shot
     const totalVideoCredits = totalShotsNeeded * CREDIT_COSTS.video;
 
@@ -137,7 +149,7 @@ export async function POST(request: NextRequest) {
     // Process in background
     processVideos(dramaId, episodesNeedingVideo, drama.style || "realistic", taskId, session.user.id).catch(
       console.error
-    );
+    ).finally(() => releaseUserSlot(session.user.id));
 
     return NextResponse.json({
       taskId,
@@ -306,18 +318,20 @@ async function processVideos(
   taskId: string,
   userId: string
 ) {
-  try {
-    const uploadDir = path.resolve(process.env.UPLOAD_DIR || "./uploads");
-    const results: {
-      episodeNumber: number;
-      success: boolean;
-      shotsGenerated: number;
-      shotsSkipped: number;
-      error?: string;
-    }[] = [];
+  const uploadDir = path.resolve(process.env.UPLOAD_DIR || "./uploads");
+  const results: {
+    episodeNumber: number;
+    success: boolean;
+    shotsGenerated: number;
+    shotsSkipped: number;
+    error?: string;
+  }[] = [];
 
-    let totalCreditsUsed = 0;
-    let completedCount = 0;
+  let totalCreditsUsed = 0;
+  let completedCount = 0;
+
+  try {
+
 
     for (const episode of episodesList) {
       await throwIfGenerationTaskCancelled(taskId);
@@ -536,6 +550,13 @@ async function processVideos(
     }
 
     console.error("Background video processing failed:", error);
+    
+    // Refund credits if nothing was generated
+    if (totalCreditsUsed > 0 && !results.some((r) => r.success && r.shotsGenerated > 0)) {
+      log.warn(`No videos generated, refunding ${totalCreditsUsed} credits`, { dramaId, taskId });
+      await refundCredits(userId, totalCreditsUsed, dramaId, "AI 视频生成失败 - 积分退还").catch(console.error);
+    }
+    
     await failGenerationTask(
       taskId,
       dramaId,

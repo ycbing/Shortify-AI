@@ -8,7 +8,7 @@ import { uploadFileToCos, imageCosKey } from "@/lib/ai/cos-storage";
 import path from "path";
 import fs from "fs/promises";
 import type { Shot, Character } from "@/types/drama";
-import { checkCredits, CREDIT_COSTS, requireCreditDeduction } from "@/lib/credits";
+import { checkCredits, CREDIT_COSTS, requireCreditDeduction, refundCredits } from "@/lib/credits";
 import { getOwnedDrama } from "@/lib/dramas";
 import { updateDramaStatus } from "@/lib/drama-status";
 import {
@@ -21,6 +21,10 @@ import {
   throwIfGenerationTaskCancelled,
   updateGenerationTaskProgress,
 } from "@/lib/generation";
+import { tryAcquireUserSlot, releaseUserSlot, getUserActiveCount } from "@/lib/resilience";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("storyboard-api");
 
 /**
  * Build appearance-enriched prompt for a shot.
@@ -167,6 +171,14 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    // Concurrency control: max 2 tasks per user
+    if (!tryAcquireUserSlot(session.user.id)) {
+      return NextResponse.json({
+        error: `当前有 ${getUserActiveCount(session.user.id)} 个任务正在进行，请等待完成后再试`,
+        code: "TOO_MANY_TASKS",
+      }, { status: 429 });
+    }
+
     const totalCredits = allEpisodes.length * CREDIT_COSTS.storyboard;
     const bulkCreditCheck = await checkCredits(session.user.id, totalCredits);
     if (!bulkCreditCheck.ok) {
@@ -191,7 +203,7 @@ export async function POST(request: NextRequest) {
       characters: Array.isArray(drama.characters) ? drama.characters : [],
       uploadDir,
       allEpisodes,
-    }).catch(console.error);
+    }).catch(console.error).finally(() => releaseUserSlot(session.user.id));
 
     return NextResponse.json({
       taskId,
@@ -233,10 +245,10 @@ async function processStoryboardGeneration({
   uploadDir,
   allEpisodes,
 }: StoryboardGenerationParams) {
-  try {
-    const results: { episodeNumber: number; imageUrl: string; shotImages?: { shotNumber: number; imageUrl: string }[] }[] = [];
-    let creditsUsed = 0;
+  const results: { episodeNumber: number; imageUrl: string; shotImages?: { shotNumber: number; imageUrl: string }[] }[] = [];
+  let creditsUsed = 0;
 
+  try {
     for (const episode of allEpisodes) {
       await throwIfGenerationTaskCancelled(taskId);
 
@@ -308,7 +320,11 @@ async function processStoryboardGeneration({
         if (err instanceof GenerationTaskCancelledError) {
           throw err;
         }
-        console.error(`Failed to generate image for episode ${episode.episodeNumber}:`, err);
+        log.error(`Failed to generate image for episode ${episode.episodeNumber}`, {
+          error: err instanceof Error ? err.message : String(err),
+          dramaId,
+          episodeNumber: episode.episodeNumber,
+        });
         results.push({ episodeNumber: episode.episodeNumber, imageUrl: "" });
       }
 
@@ -353,6 +369,12 @@ async function processStoryboardGeneration({
   } catch (error) {
     if (error instanceof GenerationTaskCancelledError) {
       return;
+    }
+
+    // Refund credits if nothing was generated
+    if (creditsUsed > 0 && !results.some((r) => r.imageUrl || r.shotImages?.some((s) => s.imageUrl))) {
+      log.warn(`No storyboard generated, refunding ${creditsUsed} credits`, { dramaId, taskId });
+      await refundCredits(userId, creditsUsed, dramaId, "分镜生成失败 - 积分退还").catch(console.error);
     }
 
     await failGenerationTask(

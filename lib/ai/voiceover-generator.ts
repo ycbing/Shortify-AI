@@ -9,6 +9,10 @@ import {
   isXunfeiConfigured,
   mapVoiceId,
 } from "@/lib/ai/xunfei-tts";
+import { withRetry } from "@/lib/resilience";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("voiceover-generator");
 
 const execAsync = promisify(exec);
 
@@ -34,21 +38,49 @@ export async function generateVoiceover(
   if (isXunfeiConfigured()) {
     try {
       const xfyVoice = mapVoiceId(voice);
-      return await xunfeiTts(text, outputPath, xfyVoice);
+      return await withRetry(
+        () => xunfeiTts(text, outputPath, xfyVoice),
+        {
+          maxRetries: 2,
+          baseDelayMs: 2000,
+          onRetry: (attempt, err, delayMs) => {
+            log.warn(`iFlytek TTS retry ${attempt} after ${Math.round(delayMs)}ms`, {
+              voice: xfyVoice,
+              error: err.message,
+            });
+          },
+        }
+      );
     } catch (err) {
-      console.warn("iFlytek TTS failed, falling back to Edge-TTS:", err instanceof Error ? err.message : err);
+      log.warn("iFlytek TTS failed after retries, falling back to Edge-TTS", {
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
-  // Fallback: Edge-TTS
+  // Fallback: Edge-TTS (with retry)
   const escapedText = text.replace(/"/g, '\\"').replace(/\n/g, " ");
   const cmd = `edge-tts --voice "${voice}" --rate="${rate}" --pitch="${pitch}" --text "${escapedText}" --write-media "${outputPath}"`;
 
   try {
-    await execAsync(cmd, { timeout: 60000 });
-  } catch (error) {
+    await withRetry(() => execAsync(cmd, { timeout: 60000 }), {
+      maxRetries: 2,
+      baseDelayMs: 3000,
+      onRetry: (attempt, err, delayMs) => {
+        log.warn(`Edge-TTS retry ${attempt} after ${Math.round(delayMs)}ms`, {
+          voice,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      },
+    });
+  } catch (err) {
+    log.error(`Voiceover generation failed after retries`, {
+      voice,
+      textLength: text.length,
+      error: err instanceof Error ? err.message : String(err),
+    });
     throw new Error(
-      `Voiceover generation failed. Error: ${error instanceof Error ? error.message : String(error)}`
+      `Voiceover generation failed. Error: ${err instanceof Error ? err.message : String(err)}`
     );
   }
 

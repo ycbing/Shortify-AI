@@ -1,6 +1,9 @@
 import { getStyleImagePrompt } from "./script-generator";
 import path from "path";
 import fs from "fs/promises";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("video-generator");
 
 const COGVIDEO_BASE_URL =
   process.env.GLM_BASE_URL || "https://open.bigmodel.cn/api/paas/v4";
@@ -122,7 +125,7 @@ export async function submitVideoGeneration(
         lastError = new Error(`CogVideo API 限流 (attempt ${attempt + 1}/${maxRetries + 1}): ${errorText}`);
         if (attempt < maxRetries) {
           const waitMs = retryBaseMs * Math.pow(2, attempt) + Math.random() * 1000;
-          console.warn(`[video-generator] 429 rate limited, retrying in ${Math.round(waitMs)}ms...`);
+          log.warn(`429 rate limited, retrying in ${Math.round(waitMs)}ms`, { taskId: undefined, error: errorText });
           await new Promise((resolve) => setTimeout(resolve, waitMs));
           continue;
         }
@@ -138,7 +141,7 @@ export async function submitVideoGeneration(
       lastError = err instanceof Error ? err : new Error(String(err));
       if (attempt < maxRetries) {
         const waitMs = retryBaseMs * Math.pow(2, attempt) + Math.random() * 1000;
-        console.warn(`[video-generator] request failed, retrying in ${Math.round(waitMs)}ms...`, lastError.message);
+        log.warn(`Request failed, retrying in ${Math.round(waitMs)}ms`, { error: lastError.message });
         await new Promise((resolve) => setTimeout(resolve, waitMs));
         continue;
       }
