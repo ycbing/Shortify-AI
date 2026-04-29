@@ -3,6 +3,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { dramas, generationTasks } from "@/lib/db/schema";
 import { inferDramaStatus, updateDramaStatus } from "@/lib/drama-status";
+import { taskEventBus, type TaskEvent } from "@/lib/task-event-bus";
 
 const GENERATION_TASK_HEARTBEAT_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes (was 15)
 
@@ -138,6 +139,22 @@ export async function completeGenerationTask(
       errorMessage: null,
     })
     .where(eq(generationTasks.id, taskId));
+
+  // Emit completion event
+  const task = await db
+    .select({ dramaId: generationTasks.dramaId })
+    .from(generationTasks)
+    .where(eq(generationTasks.id, taskId))
+    .limit(1);
+  if (task[0]) {
+    taskEventBus.emit({
+      type: "task:completed",
+      taskId,
+      dramaId: task[0].dramaId,
+      payload: { ...outputData },
+      timestamp: new Date().toISOString(),
+    });
+  }
 }
 
 type CreateGenerationTaskParams = {
@@ -225,6 +242,16 @@ export async function updateGenerationTaskProgress(
   outputData: Record<string, unknown>
 ) {
   await touchGenerationTaskHeartbeat(taskId, outputData);
+
+  // Emit real-time progress event
+  const task = await db
+    .select({ dramaId: generationTasks.dramaId })
+    .from(generationTasks)
+    .where(eq(generationTasks.id, taskId))
+    .limit(1);
+  if (task[0]) {
+    taskEventBus.emitProgress(taskId, task[0].dramaId, outputData);
+  }
 }
 
 export async function failGenerationTask(
@@ -249,6 +276,15 @@ export async function failGenerationTask(
       updatedAt: new Date(),
     })
     .where(eq(dramas.id, dramaId));
+
+  // Emit failure event
+  taskEventBus.emit({
+    type: "task:failed",
+    taskId,
+    dramaId,
+    payload: { errorMessage },
+    timestamp: new Date().toISOString(),
+  });
 }
 
 export async function cancelGenerationTask(

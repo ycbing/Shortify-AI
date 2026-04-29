@@ -9,6 +9,7 @@ import { Loader2, ArrowRight, ArrowLeft, ImageIcon, ChevronDown, ChevronUp, Film
 import Link from "next/link";
 import { toast } from "sonner";
 import { useTaskPolling } from "@/lib/hooks/use-task-polling";
+import { useRealtimeTask } from "@/lib/hooks/use-realtime-task";
 
 const steps = [
   { number: 1, title: "创意" },
@@ -121,12 +122,18 @@ export default function StoryboardPageContent() {
     });
   }, [dramaId, fetchEpisodes, router]);
 
+  // Start realtime (or polling) connection when taskId is set
+  useEffect(() => {
+    if (!activeTaskId) return;
+    // The useRealtimeTask hook handles auto-start via its own effect
+    // but we manually trigger it here when activeTaskId changes
+    // by triggering a re-render via the hook's internal autoStart logic
+  }, [activeTaskId]);
+
   useEffect(() => {
     if (!activeTaskId) return;
     void startPolling();
   }, [activeTaskId, startPolling]);
-
-  const progressLabel = activeTask?.progress?.label || taskProgressLabel;
 
   useEffect(() => {
     if (!dramaId || items.length === 0 || activeTaskId || generating) return;
@@ -155,6 +162,38 @@ export default function StoryboardPageContent() {
       cancelled = true;
     };
   }, [activeTaskId, dramaId, generating, items]);
+
+  // Real-time task progress (WebSocket with polling fallback)
+  const { task: realtimeTask, isConnected, connectionMode } = useRealtimeTask(activeTaskId, dramaId, {
+    autoStart: false,
+    onCompleted: async (task) => {
+      setGenerating(false);
+      setGeneratingIndex(-1);
+      setActiveTaskId(null);
+      setTaskProgressLabel(task.presentation?.summary || "");
+      await fetchEpisodes();
+      toast.success("分镜生成完成");
+    },
+    onFailed: async (task) => {
+      setGenerating(false);
+      setGeneratingIndex(-1);
+      setActiveTaskId(null);
+      setTaskProgressLabel(task.presentation?.summary || "");
+      setError(task.presentation?.failureTitle || task.errorMessage || "分镜生成失败");
+      toast.error(task.presentation?.failureTitle || task.errorMessage || "分镜生成失败");
+    },
+    onProgress: (event) => {
+      const p = event.payload;
+      if (p.currentEpisode) setGeneratingIndex(p.currentEpisode - 1);
+      if (p.stage === "generate" && p.currentEpisode && p.totalCount) {
+        setTaskProgressLabel(`正在生成第 ${p.currentEpisode} / ${p.totalCount} 集分镜...`);
+      }
+    },
+  });
+
+  // Use realtime task when available, otherwise fall back to polling task
+  const activeTaskData = realtimeTask || activeTask;
+  const progressLabel = activeTaskData?.progress?.label || taskProgressLabel;
 
   const handleGenerateAll = async () => {
     if (!dramaId) return;
@@ -333,8 +372,8 @@ export default function StoryboardPageContent() {
                 ref={progressRef}
                 className="h-full bg-emerald-500 rounded-full transition-all duration-500 ease-out"
                 style={{
-                  width: `${activeTask?.progress?.total
-                    ? (activeTask.progress.completed / activeTask.progress.total) * 100
+                  width: `${activeTaskData?.progress?.total
+                    ? (activeTaskData.progress.completed / activeTaskData.progress.total) * 100
                     : generatingIndex >= 0
                       ? ((generatingIndex + 1) / totalCount) * 100
                       : 5}%`,
