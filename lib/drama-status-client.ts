@@ -24,8 +24,7 @@ export const DRAMA_STATUS_META: Record<
 export const DRAMA_PROGRESS_STEPS = [
   { key: "script", label: "剧本" },
   { key: "storyboard", label: "分镜" },
-  { key: "voiceover", label: "配音" },
-  { key: "video", label: "视频" },
+  { key: "video", label: "配音+视频" },
 ] as const;
 
 export function inferDramaStatusFromEpisodes(
@@ -66,11 +65,8 @@ export function getCompletedDramaSteps(
     completed.add("storyboard");
   }
 
-  if (episodesList.some((episode) => episode.voiceoverUrl)) {
-    completed.add("voiceover");
-  }
-
-  if (episodesList.some((episode) => episode.videoUrl)) {
+  // "video" step covers both voiceover + video composition
+  if (episodesList.some((episode) => episode.voiceoverUrl || episode.videoUrl)) {
     completed.add("video");
   }
 

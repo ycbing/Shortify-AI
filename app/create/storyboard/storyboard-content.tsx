@@ -15,7 +15,6 @@ const steps = [
   { number: 1, title: "创意" },
   { number: 2, title: "剧本" },
   { number: 3, title: "分镜" },
-  { number: 4, title: "预览" },
 ];
 
 interface StoryboardItem {

@@ -259,7 +259,7 @@ export async function POST(request: NextRequest) {
     const taskResult = await createOrReuseGenerationTask({
       dramaId,
       type: "compose",
-      inputData: { episodeCount: allEpisodes.length },
+      inputData: { episodeCount: allEpisodes.length, autoComposed: false },
     });
     taskId = taskResult.taskId;
 

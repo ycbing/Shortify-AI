@@ -1,14 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { episodes, type Episode } from "@/lib/db/schema";
+import { dramas, episodes, type Episode } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { generateVoiceover, generateShotVoiceovers } from "@/lib/ai/voiceover-generator";
-import type { Shot } from "@/types/drama";
+import type { Shot, ShotAudio } from "@/types/drama";
 import path from "path";
+import fs from "fs/promises";
 import { checkCredits, CREDIT_COSTS, requireCreditDeduction, refundCredits } from "@/lib/credits";
 import { getOwnedDrama } from "@/lib/dramas";
 import { updateDramaStatus } from "@/lib/drama-status";
+import { composeEpisodeFromShots, composeVideo, mergeVideos } from "@/lib/ai/video-composer";
+import { generateSubtitles } from "@/lib/ai/subtitle-generator";
+import { uploadFileToCos, videoCosKey } from "@/lib/ai/cos-storage";
+import { inferBgmPreset, BGM_VOLUME_MAP } from "@/lib/ai/bgm-library";
 import {
   completeGenerationTask,
   createOrReuseGenerationTask,
@@ -24,6 +29,79 @@ import { createLogger } from "@/lib/logger";
 
 const log = createLogger("voiceover-api");
 
+/**
+ * Convert an absolute local path to a relative uploads path for database storage.
+ * COS URLs (http) are returned as-is.
+ */
+function toDbPath(filePath: string): string {
+  if (filePath.startsWith("http")) return filePath;
+  const prefix = "/uploads/";
+  const idx = filePath.indexOf(prefix);
+  if (idx >= 0) {
+    return filePath.slice(idx + 1);
+  }
+  return filePath;
+}
+
+/**
+ * Reconstruct ShotAudio array from voiceover directory.
+ */
+async function reconstructShotAudios(
+  shots: Shot[],
+  voiceoverUrl: string | null,
+  dramaId: string,
+  episodeNumber: number
+): Promise<ShotAudio[]> {
+  const { exec } = await import("child_process");
+  const { promisify } = await import("util");
+  const execAsync = promisify(exec);
+
+  const shotAudios: ShotAudio[] = [];
+
+  let voiceoverDir: string;
+  if (voiceoverUrl) {
+    voiceoverDir = voiceoverUrl;
+  } else {
+    voiceoverDir = path.join(
+      process.env.UPLOAD_DIR
+        ? path.resolve(process.env.UPLOAD_DIR)
+        : path.resolve("./uploads"),
+      "voiceovers",
+      dramaId,
+      `episode-${episodeNumber}`
+    );
+  }
+
+  for (const shot of shots) {
+    const audioPath = path.join(voiceoverDir, `shot-${shot.shotNumber}.mp3`);
+    let duration = shot.duration || 5;
+
+    try {
+      await fs.access(audioPath);
+      try {
+        const { stdout } = await execAsync(
+          `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${audioPath}"`
+        );
+        duration = parseFloat(stdout.trim()) || duration;
+      } catch {
+        // use estimated
+      }
+    } catch {
+      // file doesn't exist
+    }
+
+    shotAudios.push({
+      shotNumber: shot.shotNumber,
+      audioUrl: audioPath,
+      duration: Math.round(duration * 10) / 10,
+      type: shot.type === "dialogue" ? "dialogue" : "narration",
+      character: shot.character,
+    });
+  }
+
+  return shotAudios;
+}
+
 export async function POST(request: NextRequest) {
   let taskId: string | null = null;
   let dramaId: string | null = null;
@@ -35,7 +113,7 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json();
     dramaId = body.dramaId;
-    const { episodeId } = body;
+    const { episodeId, autoCompose = true } = body;
 
     if (!dramaId) {
       return NextResponse.json({ error: "缺少 dramaId" }, { status: 400 });
@@ -190,6 +268,7 @@ export async function POST(request: NextRequest) {
       userId: session.user.id,
       uploadDir,
       allEpisodes,
+      autoCompose,
     }).catch(console.error).finally(() => releaseUserSlot(session.user.id));
 
     return NextResponse.json({
@@ -219,6 +298,7 @@ type VoiceoverGenerationParams = {
   userId: string;
   uploadDir: string;
   allEpisodes: Episode[];
+  autoCompose?: boolean;
 };
 
 async function processVoiceoverGeneration({
@@ -227,6 +307,7 @@ async function processVoiceoverGeneration({
   userId,
   uploadDir,
   allEpisodes,
+  autoCompose = true,
 }: VoiceoverGenerationParams) {
   const results: { episodeNumber: number; voiceoverUrl: string; duration: number; shotAudios?: unknown[] }[] = [];
   let creditsUsed = 0;
@@ -339,12 +420,213 @@ async function processVoiceoverGeneration({
 
     await updateDramaStatus(dramaId, "voiceover_ready");
 
-    await completeGenerationTask(taskId, {
-      completedCount: results.length,
-      episodeCount: allEpisodes.length,
-      creditsUsed,
-      results,
-    });
+    // Auto-compose preview videos after all voiceovers are generated
+    if (autoCompose) {
+      log.info("Voiceover complete, starting auto-compose for all episodes", { dramaId });
+
+      // Get drama info (bgmUrl, genre)
+      const [dramaData] = await db
+        .select({ bgmUrl: dramas.bgmUrl, genre: dramas.genre })
+        .from(dramas)
+        .where(eq(dramas.id, dramaId))
+        .limit(1);
+
+      let bgmPath: string | null = null;
+      let bgmVolume = 0.15;
+      if (dramaData?.bgmUrl) {
+        const resolvedBgmPath = path.isAbsolute(dramaData.bgmUrl)
+          ? dramaData.bgmUrl
+          : path.join(uploadDir, dramaData.bgmUrl);
+        try {
+          await fs.access(resolvedBgmPath);
+          bgmPath = resolvedBgmPath;
+          bgmVolume = BGM_VOLUME_MAP[inferBgmPreset(dramaData.genre)] ?? 0.15;
+        } catch { /* BGM not found */ }
+      }
+
+      const videoPaths: string[] = [];
+      let composedCount = 0;
+
+      for (const episode of allEpisodes) {
+        await throwIfGenerationTaskCancelled(taskId);
+
+        if (!episode.voiceoverUrl) {
+          log.warn(`Episode ${episode.episodeNumber} has no voiceover, skipping auto-compose`);
+          continue;
+        }
+
+        if (!episode.imageUrl && !(episode.shotData && Array.isArray(episode.shotData))) {
+          log.warn(`Episode ${episode.episodeNumber} has no storyboard data, skipping auto-compose`);
+          continue;
+        }
+
+        try {
+          await touchGenerationTaskHeartbeat(taskId, {
+            currentEpisode: episode.episodeNumber,
+            stage: "auto-compose",
+            completedCount: composedCount,
+            episodeCount: allEpisodes.length,
+            creditsUsed,
+          });
+
+          const outputPath = path.join(
+            uploadDir, "videos", dramaId, `episode-${episode.episodeNumber}.mp4`
+          );
+
+          if (episode.shotData && Array.isArray(episode.shotData)) {
+            const shots = episode.shotData as Shot[];
+            const shotAudios = await reconstructShotAudios(
+              shots, episode.voiceoverUrl, dramaId, episode.episodeNumber
+            );
+
+            // Build shot images map from disk
+            const shotImages = new Map<number, string>();
+            const shotVideos = new Map<number, string>();
+            const shotImageDir = path.join(
+              uploadDir, "images", dramaId, `episode-${episode.episodeNumber}`
+            );
+
+            for (const shot of shots) {
+              if (shot.aiVideoUrl) {
+                try {
+                  await fs.access(shot.aiVideoUrl);
+                  shotVideos.set(shot.shotNumber, shot.aiVideoUrl);
+                } catch { /* AI video not found */ }
+              }
+
+              const imgPath = path.join(shotImageDir, `shot-${shot.shotNumber}.jpg`);
+              try {
+                await fs.access(imgPath);
+                shotImages.set(shot.shotNumber, imgPath);
+              } catch {
+                const imgPathPng = path.join(shotImageDir, `shot-${shot.shotNumber}.png`);
+                try {
+                  await fs.access(imgPathPng);
+                  shotImages.set(shot.shotNumber, imgPathPng);
+                } catch { /* no shot image */ }
+              }
+            }
+
+            // Generate subtitles
+            let subtitlePath = episode.subtitleUrl;
+            if (!subtitlePath) {
+              await touchGenerationTaskHeartbeat(taskId, {
+                currentEpisode: episode.episodeNumber,
+                stage: "subtitles",
+              });
+              subtitlePath = await generateSubtitles(
+                shots, shotAudios, dramaId, episode.episodeNumber
+              );
+              await throwIfGenerationTaskCancelled(taskId);
+              await db
+                .update(episodes)
+                .set({ subtitleUrl: subtitlePath })
+                .where(eq(episodes.id, episode.id));
+            }
+
+            await throwIfGenerationTaskCancelled(taskId);
+            await touchGenerationTaskHeartbeat(taskId, {
+              currentEpisode: episode.episodeNumber,
+              stage: "compose",
+            });
+            await composeEpisodeFromShots(
+              shots, shotAudios, dramaId, episode.episodeNumber,
+              {
+                imageUrl: episode.imageUrl,
+                subtitlePath,
+                shotImages,
+                shotVideos,
+                bgmPath,
+                bgmVolume,
+              }
+            );
+          } else if (episode.imageUrl && episode.voiceoverUrl) {
+            // V1 fallback
+            await touchGenerationTaskHeartbeat(taskId, {
+              currentEpisode: episode.episodeNumber,
+              stage: "compose",
+            });
+            await composeVideo({
+              imagePath: episode.imageUrl,
+              audioPath: episode.voiceoverUrl,
+              outputPath,
+              subtitlePath: episode.subtitleUrl || undefined,
+            });
+          } else {
+            continue;
+          }
+
+          await throwIfGenerationTaskCancelled(taskId);
+
+          // Upload to COS
+          const cosKey = videoCosKey(dramaId, episode.episodeNumber);
+          const finalVideoUrl = toDbPath(await uploadFileToCos(outputPath, cosKey));
+
+          await db
+            .update(episodes)
+            .set({ videoUrl: finalVideoUrl })
+            .where(eq(episodes.id, episode.id));
+
+          videoPaths.push(outputPath);
+          composedCount++;
+
+          await updateGenerationTaskProgress(taskId, {
+            completedCount: composedCount,
+            episodeCount: allEpisodes.length,
+            creditsUsed,
+            stage: "auto-compose",
+          });
+        } catch (err) {
+          if (err instanceof GenerationTaskCancelledError) {
+            throw err;
+          }
+          log.error(`Auto-compose failed for episode ${episode.episodeNumber}`, { error: err instanceof Error ? err.message : String(err) });
+        }
+      }
+
+      // Merge all episode videos into complete video
+      let mergedUrl: string | null = null;
+      if (videoPaths.length > 0) {
+        await touchGenerationTaskHeartbeat(taskId, {
+          stage: "merge",
+          completedCount: videoPaths.length,
+          episodeCount: allEpisodes.length,
+          creditsUsed,
+        });
+
+        const mergedPath = path.join(uploadDir, "videos", dramaId, "complete.mp4");
+        const localMergedPath = await mergeVideos(videoPaths, mergedPath);
+        const mergedCosKey = `${dramaId}/videos/complete.mp4`;
+        mergedUrl = toDbPath(await uploadFileToCos(localMergedPath, mergedCosKey));
+      }
+
+      // Update drama total duration and status
+      const totalDuration = allEpisodes.reduce(
+        (sum, ep) => sum + (ep.duration || 0), 0
+      );
+      await db
+        .update(dramas)
+        .set({ totalDuration })
+        .where(eq(dramas.id, dramaId));
+      await updateDramaStatus(dramaId, "completed");
+
+      await completeGenerationTask(taskId, {
+        completedCount: results.length,
+        episodeCount: allEpisodes.length,
+        creditsUsed,
+        results,
+        videoCount: videoPaths.length,
+        mergedUrl: mergedUrl || undefined,
+        autoComposed: true,
+      });
+    } else {
+      await completeGenerationTask(taskId, {
+        completedCount: results.length,
+        episodeCount: allEpisodes.length,
+        creditsUsed,
+        results,
+      });
+    }
   } catch (error) {
     if (error instanceof GenerationTaskCancelledError) {
       return;

@@ -17,8 +17,7 @@ import { useTaskPolling } from "@/lib/hooks/use-task-polling";
 const steps = [
   { number: 1, title: "创意" },
   { number: 2, title: "剧本" },
-  { number: 3, title: "分镜" },
-  { number: 4, title: "预览" },
+  { number: 3, title: "分镜+视频" },
 ];
 
 interface EpisodeData {
@@ -589,7 +588,7 @@ export default function PreviewPageContent() {
     <div className="min-h-screen bg-background">
       <header className="border-b border-border/50 bg-background/80 backdrop-blur-xl sticky top-0 z-40">
         <div className="mx-auto max-w-6xl flex items-center justify-between px-4 h-14 sm:h-16 gap-2">
-          <StepIndicator currentStep={4} steps={steps} />
+          <StepIndicator currentStep={3} steps={steps} />
           {dramaId && (
             <ExportDialog
               dramaId={dramaId}
@@ -604,13 +603,13 @@ export default function PreviewPageContent() {
         {/* Step hint */}
         <div className="mb-6 sm:mb-8 p-3 sm:p-4 rounded-lg bg-emerald-500/5 border border-emerald-500/20">
           <p className="text-xs sm:text-sm text-emerald-400">
-            🎬 生成配音、合成视频、导出你的作品
+            🎬 配音完成后会自动合成预览视频，也可在此手动操作
           </p>
         </div>
 
         <div className="mb-6 sm:mb-8">
           <h1 className="text-xl sm:text-2xl font-bold mb-1">预览与导出 🎬</h1>
-          <p className="text-xs sm:text-sm text-muted-foreground">为你的短剧生成配音、合成视频</p>
+          <p className="text-xs sm:text-sm text-muted-foreground">生成配音，系统将自动合成预览视频</p>
         </div>
 
         {error && (
@@ -749,7 +748,7 @@ export default function PreviewPageContent() {
           <TabsList className="bg-muted/30 w-full overflow-x-auto flex h-auto p-1 gap-1">
             <TabsTrigger value="preview" className="inline-flex items-center gap-1.5 shrink-0 min-h-[40px] text-xs sm:text-sm px-3 sm:px-4">📹 视频预览</TabsTrigger>
             <TabsTrigger value="voiceover" className="inline-flex items-center gap-1.5 shrink-0 min-h-[40px] text-xs sm:text-sm px-3 sm:px-4">🎙️ 配音管理</TabsTrigger>
-            <TabsTrigger value="compose" className="inline-flex items-center gap-1.5 shrink-0 min-h-[40px] text-xs sm:text-sm px-3 sm:px-4">🎬 合成视频</TabsTrigger>
+            <TabsTrigger value="compose" className="inline-flex items-center gap-1.5 shrink-0 min-h-[40px] text-xs sm:text-sm px-3 sm:px-4">⚙️ 高级选项</TabsTrigger>
           </TabsList>
 
           <TabsContent value="preview" className="w-full">
@@ -831,9 +830,9 @@ export default function PreviewPageContent() {
 
               {/* FFmpeg 幻灯片合成 */}
               <div className="border border-border/50 rounded-lg p-4 sm:p-6 bg-card/50">
-                <h3 className="font-semibold text-sm sm:text-base mb-2">幻灯片合成（备选）</h3>
+                <h3 className="font-semibold text-sm sm:text-base mb-2">幻灯片合成（手动重试）</h3>
                 <p className="text-xs sm:text-sm text-muted-foreground mb-4">
-                  将分镜图片和配音合成为幻灯片视频。如果 AI 视频生成失败，可以用这个。
+                  使用 Ken Burns 效果将分镜图片和配音合成为幻灯片视频。配音完成后已自动合成，此处用于手动重试。
                 </p>
                 <div className="space-y-2 mb-4 sm:mb-6">
                   {episodes.map((ep) => (
