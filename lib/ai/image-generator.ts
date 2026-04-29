@@ -23,10 +23,11 @@ export async function generateImage(
   const stylePrompt = getStyleImagePrompt(style as "realistic" | "anime" | "ink" | "cyberpunk");
   const fullPrompt = `${prompt}。画面风格：${stylePrompt}。宽屏16:9构图，电影感画面，专业摄影级别。`;
 
-  const model = process.env.IMAGE_MODEL || "cogview-3-flash";
+  const model = process.env.IMAGE_MODEL || "glm-image";
 
-  // 1280x720: safe default for cogview models
-  const imageSize = model.includes("cogview-3-flash") ? "1280x720" : size;
+  // glm-image: width/height must be 32-aligned, max 2880px, total pixels < 2^22
+  // cogview-3-flash: supports 1280x720, 1024x1024, etc.
+  const imageSize = model.includes("glm-image") ? "1728x960" : size;
 
   // Content filter (1301) fallback strategy:
   // Progressive prompt sanitization to bypass content filter
