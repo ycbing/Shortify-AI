@@ -2,6 +2,7 @@
 
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
 import { PenLine } from "lucide-react";
 
 interface ThemeInputProps {
@@ -16,15 +17,27 @@ export function ThemeInput({ value, onChange }: ThemeInputProps) {
         <PenLine className="h-4 w-4 text-emerald-400" />
         创意主题
       </Label>
-      <Textarea
-        id="theme"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder="描述你的短剧创意，例如：一个程序员在深夜加班时，发现公司AI系统产生了自我意识..."
-        rows={4}
-        className="bg-muted/30 text-sm resize-none"
-        maxLength={500}
-      />
+      <div className="flex gap-2">
+        <div className="flex-1">
+          <Textarea
+            id="theme"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder="描述你的短剧创意，例如：一个程序员在深夜加班时，发现公司AI系统产生了自我意识..."
+            rows={4}
+            className="bg-muted/30 text-sm resize-none"
+            maxLength={500}
+          />
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="shrink-0 self-start mt-0"
+          onClick={() => document.getElementById('inspirations')?.scrollIntoView({ behavior: 'smooth' })}
+        >
+          💡 灵感
+        </Button>
+      </div>
       <p className="text-xs text-muted-foreground text-right">
         {value.length}/500
       </p>

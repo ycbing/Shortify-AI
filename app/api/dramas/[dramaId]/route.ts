@@ -70,6 +70,63 @@ export async function PUT(
       return NextResponse.json({ error: "短剧不存在" }, { status: 404 });
     }
 
+    // If episodes data is provided, update episodes table
+    if (body.episodes && Array.isArray(body.episodes)) {
+      const { episodes: episodesData, ...dramaFields } = body;
+
+      // Update drama fields if any (e.g. characters)
+      if (Object.keys(dramaFields).length > 0) {
+        await db
+          .update(dramas)
+          .set({
+            ...dramaFields,
+            updatedAt: new Date(),
+          })
+          .where(eq(dramas.id, dramaId));
+      }
+
+      // Update each episode's shotData and scriptContent
+      for (const ep of episodesData) {
+        if (!ep.id) continue;
+
+        const updates: Record<string, unknown> = {};
+        if (ep.shotData !== undefined) {
+          updates.shotData = ep.shotData;
+        }
+        if (ep.scriptContent !== undefined) {
+          updates.scriptContent = ep.scriptContent;
+        }
+        if (ep.title !== undefined) {
+          updates.title = ep.title;
+        }
+        if (ep.duration !== undefined) {
+          updates.duration = ep.duration;
+        }
+
+        if (Object.keys(updates).length > 0) {
+          await db
+            .update(episodes)
+          .set(updates)
+            .where(eq(episodes.id, ep.id));
+        }
+      }
+
+      // Return updated drama with episodes
+      const updatedDrama = await db
+        .select()
+        .from(dramas)
+        .where(eq(dramas.id, dramaId))
+        .limit(1);
+
+      const updatedEpisodes = await db
+        .select()
+        .from(episodes)
+        .where(eq(episodes.dramaId, dramaId))
+        .orderBy(episodes.episodeNumber);
+
+      return NextResponse.json({ drama: updatedDrama[0], episodes: updatedEpisodes });
+    }
+
     const [updated] = await db
       .update(dramas)
       .set({

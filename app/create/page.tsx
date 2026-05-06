@@ -11,6 +11,18 @@ import { StepIndicator } from "@/components/create/step-indicator";
 import { Loader2, Sparkles } from "lucide-react";
 import type { DramaGenreType, DramaStyleType } from "@/types/drama";
 
+const inspirations = [
+  { theme: "程序员发现公司AI有了自我意识", genre: "mystery" as DramaGenreType, style: "cyberpunk" as DramaStyleType, emoji: "🔍", label: "深夜加班" },
+  { theme: "十年后的同学会上意外重逢", genre: "romance" as DramaGenreType, style: "anime" as DramaStyleType, emoji: "💕", label: "校园回忆" },
+  { theme: "性格迥异的四个人的爆笑生活", genre: "comedy" as DramaGenreType, style: "realistic" as DramaStyleType, emoji: "😂", label: "合租奇遇" },
+  { theme: "穿越到古代的现代人如何生存", genre: "comedy" as DramaGenreType, style: "realistic" as DramaStyleType, emoji: "⏰", label: "穿越时空" },
+  { theme: "退休老警察接到一封匿名信", genre: "mystery" as DramaGenreType, style: "realistic" as DramaStyleType, emoji: "📬", label: "匿名信" },
+  { theme: "学霸和学渣灵魂互换", genre: "comedy" as DramaGenreType, style: "anime" as DramaStyleType, emoji: "🔄", label: "灵魂互换" },
+];
+
+const GENRE_LABELS: Record<string, string> = { mystery: "悬疑", romance: "爱情", comedy: "喜剧", scifi: "科幻", horror: "恐怖" };
+const STYLE_LABELS: Record<string, string> = { realistic: "写实", anime: "动漫", ink: "水墨", cyberpunk: "赛博朋克" };
+
 const steps = [
   { number: 1, title: "创意" },
   { number: 2, title: "剧本" },
@@ -145,6 +157,41 @@ function CreatePageContent() {
             onGenreChange={(v) => setGenre(v)}
             onStyleChange={(v) => setStyle(v)}
           />
+
+          {/* Inspiration Cards */}
+          <div id="inspirations" className="space-y-3">
+            <label className="text-sm font-medium">✨ 灵感参考</label>
+            <div className="flex gap-3 overflow-x-auto pb-2 -mx-4 px-4 snap-x snap-mandatory scrollbar-none">
+              {inspirations.map((insp, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => {
+                    setTheme(insp.theme);
+                    setGenre(insp.genre);
+                    setStyle(insp.style);
+                  }}
+                  className="shrink-0 snap-start w-36 p-3 rounded-xl border border-border/50 bg-card/30 hover:border-emerald-500/50 hover:bg-emerald-500/5 transition-all text-left group"
+                >
+                  <span className="text-2xl block mb-2">{insp.emoji}</span>
+                  <p className="text-xs font-medium text-emerald-400 mb-1">{insp.label}</p>
+                  <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">{insp.theme}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Preview Summary */}
+          {canSubmit && (
+            <div className="border border-emerald-500/20 rounded-lg p-4 bg-emerald-500/5">
+              <p className="text-sm font-medium mb-2">📋 创作预览</p>
+              <div className="grid grid-cols-2 gap-2 text-sm text-muted-foreground">
+                <span>主题</span><span className="text-foreground truncate ml-2">{theme}</span>
+                <span>类型</span><span className="text-foreground">{GENRE_LABELS[genre] || genre}</span>
+                <span>画风</span><span className="text-foreground">{STYLE_LABELS[style] || style}</span>
+                <span>集数</span><span className="text-foreground">{episodeCount} 集</span>
+              </div>
+            </div>
+          )}
 
           <EpisodeCounter value={episodeCount} onChange={setEpisodeCount} />
 
