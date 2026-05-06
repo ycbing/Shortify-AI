@@ -22,6 +22,9 @@ export function Header() {
 
         {/* Desktop nav */}
         <nav className="hidden md:flex items-center gap-6">
+          <Link href="/gallery" className="text-sm text-muted-foreground hover:text-foreground transition">
+            作品广场
+          </Link>
           <Link href="/#features" className="text-sm text-muted-foreground hover:text-foreground transition">
             功能
           </Link>
@@ -65,6 +68,7 @@ export function Header() {
       {/* Mobile nav */}
       {mobileOpen && (
         <div className="md:hidden border-t border-border/50 bg-background/95 backdrop-blur-xl p-4 space-y-3">
+          <Link href="/gallery" className="block text-sm text-muted-foreground" onClick={() => setMobileOpen(false)}>作品广场</Link>
           <Link href="/#features" className="block text-sm text-muted-foreground" onClick={() => setMobileOpen(false)}>功能</Link>
           {session ? (
             <>

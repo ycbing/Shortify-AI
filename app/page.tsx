@@ -4,7 +4,8 @@ import Link from "next/link";
 import { Header } from "@/components/landing/header";
 import { Footer } from "@/components/landing/footer";
 import { Button } from "@/components/ui/button";
-import { Sparkles, PenTool, Image, Mic, Film, ArrowRight } from "lucide-react";
+import { Sparkles, PenTool, Image, Mic, Film, ArrowRight, Heart, Clock } from "lucide-react";
+import { useState, useEffect, Suspense } from "react";
 
 const features = [
   {
@@ -34,6 +35,78 @@ const templates = [
   { title: "校园回忆", genre: "romance", genreLabel: "爱情", style: "anime", styleLabel: "动漫", theme: "十年后的同学会上意外重逢", emoji: "💕", desc: "十年后的同学会上意外重逢" },
   { title: "合租奇遇", genre: "comedy", genreLabel: "喜剧", style: "realistic", styleLabel: "写实", theme: "性格迥异的四个人的爆笑生活", emoji: "😂", desc: "性格迥异的四个人的爆笑生活" },
 ];
+
+const genreLabels: Record<string, string> = {
+  mystery: "悬疑", romance: "爱情", comedy: "喜剧", scifi: "科幻", horror: "恐怖", fantasy: "奇幻",
+};
+
+function HotWorks() {
+  const [works, setWorks] = useState<Array<{
+    id: string; title: string; genre: string | null; style: string | null;
+    episodeCount: number | null; coverUrl: string | null; shareCount: number | null; createdAt: string;
+  }>>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch("/api/gallery?page=1&pageSize=3")
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => { if (data) setWorks(data.dramas || []); })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div key={i} className="border border-border/50 rounded-xl overflow-hidden">
+            <div className="aspect-video bg-muted animate-pulse" />
+            <div className="p-3 space-y-2"><div className="h-4 bg-muted rounded animate-pulse w-3/4" /><div className="h-3 bg-muted rounded animate-pulse w-1/2" /></div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (works.length === 0) return null;
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+      {works.map((w) => (
+        <Link
+          key={w.id}
+          href={`/view/${w.id}`}
+          className="border border-border/50 rounded-xl overflow-hidden bg-card/30 hover:border-emerald-500/30 hover:bg-card/50 transition-all group"
+        >
+          <div className="aspect-video bg-muted overflow-hidden">
+            {w.coverUrl ? (
+              <img src={w.coverUrl} alt={w.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-zinc-800 to-zinc-900">
+                <Film className="h-8 w-8 text-muted-foreground/50" />
+              </div>
+            )}
+          </div>
+          <div className="p-3 sm:p-4">
+            <h3 className="font-semibold text-sm truncate mb-1 group-hover:text-emerald-400 transition">{w.title}</h3>
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>{w.episodeCount || 0} 集</span>
+              <div className="flex items-center gap-2">
+                {(w.shareCount ?? 0) > 0 && <span className="inline-flex items-center gap-0.5"><Heart className="h-3 w-3" />{w.shareCount}</span>}
+                <span className="inline-flex items-center gap-0.5"><Clock className="h-3 w-3" />{new Date(w.createdAt).toLocaleDateString("zh-CN")}</span>
+              </div>
+            </div>
+            {w.genre && (
+              <span className="mt-2 inline-block text-[10px] bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded">
+                {genreLabels[w.genre] || w.genre}
+              </span>
+            )}
+          </div>
+        </Link>
+      ))}
+    </div>
+  );
+}
 
 export default function HomePage() {
   return (
@@ -129,6 +202,17 @@ export default function HomePage() {
               </Link>
             ))}
           </div>
+        </div>
+      </section>
+
+      {/* Hot Works — loaded from API */}
+      <section id="hot-works" className="py-16 sm:py-20 px-4">
+        <div className="mx-auto max-w-6xl">
+          <div className="text-center mb-10 sm:mb-12">
+            <h2 className="text-xl sm:text-3xl font-bold mb-3 sm:mb-4">🔥 热门作品</h2>
+            <p className="text-sm sm:text-base text-muted-foreground">来自创作者们的 AI 短剧</p>
+          </div>
+          <HotWorks />
         </div>
       </section>
 

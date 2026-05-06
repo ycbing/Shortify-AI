@@ -6,6 +6,9 @@ import { db } from "@/lib/db";
 import { dramas, episodes } from "@/lib/db/schema";
 import { eq, desc, sql } from "drizzle-orm";
 
+/** Drama statuses that are considered publicly visible */
+export const PUBLIC_DRAMA_STATUSES = new Set(["completed", "storyboard_ready", "voiceover_ready"]);
+
 export interface PublicDrama {
   id: string;
   title: string;

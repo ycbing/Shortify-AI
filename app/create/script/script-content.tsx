@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { StepIndicator } from "@/components/create/step-indicator";
 import { ScriptEditor } from "@/components/drama/script-editor";
-import { Loader2, ArrowRight, ArrowLeft, Sparkles, Users, Film, Square } from "lucide-react";
+import { Loader2, ArrowRight, ArrowLeft, Sparkles, Users, Film, Square, Save, AlertCircle } from "lucide-react";
 import type { GeneratedEpisode, GeneratedScriptV2, Shot, Character } from "@/types/drama";
 import { isScriptV2, VOICE_OPTIONS } from "@/types/drama";
 import Link from "next/link";
@@ -43,6 +43,8 @@ export default function ScriptPageContent() {
   const [error, setError] = useState("");
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [taskProgressLabel, setTaskProgressLabel] = useState("");
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const handleGenerate = useCallback(async () => {
     if (!dramaId) return;
@@ -243,6 +245,54 @@ export default function ScriptPageContent() {
     setEpisodes((prev) => prev.map((ep, i) => (i === index ? (data as typeof ep) : ep)));
   };
 
+  const updateShot = (episodeIdx: number, shotIdx: number, field: string, value: string | number) => {
+    if (!scriptV2) return;
+    const updated = { ...scriptV2 };
+    const ep = { ...updated.episodes[episodeIdx] };
+    const shots = [...ep.shots];
+    shots[shotIdx] = { ...shots[shotIdx], [field]: value };
+    ep.shots = shots;
+    updated.episodes = updated.episodes.map((e, i) => (i === episodeIdx ? ep : e));
+    setScriptV2(updated);
+    setHasUnsavedChanges(true);
+  };
+
+  const handleSave = async () => {
+    if (!dramaId || !scriptV2) return;
+    setSaving(true);
+    try {
+      // Build episodes data for the API
+      const episodesData = scriptV2.episodes.map((ep) => ({
+        episodeNumber: ep.episodeNumber,
+        shots: ep.shots,
+        scriptContent: JSON.stringify({
+          sceneDescription: ep.sceneDescription,
+          shots: ep.shots,
+        }),
+      }));
+
+      const res = await fetch(`/api/dramas/${dramaId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ characters, episodes: episodesData }),
+      });
+
+      if (res.ok) {
+        setHasUnsavedChanges(false);
+        const { toast } = await import("sonner");
+        toast.success("剧本保存成功");
+      } else {
+        const { toast } = await import("sonner");
+        toast.error("保存失败，请重试");
+      }
+    } catch {
+      const { toast } = await import("sonner");
+      toast.error("保存失败，请重试");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   // Get voice label from voiceId
   const getVoiceLabel = (voiceId: string) => {
     for (const [label, id] of Object.entries(VOICE_OPTIONS)) {
@@ -416,7 +466,7 @@ export default function ScriptPageContent() {
                   )}
 
                   <div className="space-y-2">
-                    {episode.shots.map((shot) => (
+                    {episode.shots.map((shot, shotIdx) => (
                       <div
                         key={shot.shotNumber}
                         className={`border rounded-lg p-2.5 sm:p-3 ${
@@ -438,32 +488,76 @@ export default function ScriptPageContent() {
                           >
                             {shot.type === "dialogue" ? "对话" : "旁白"}
                           </span>
-                          <span className="text-xs text-muted-foreground">
-                            {shot.duration}s
-                          </span>
-                        </div>
-                        <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed mb-1">
-                          {shot.visual}
-                        </p>
-                        {shot.type === "dialogue" && shot.character && (
-                          <div className="mt-2 pl-3 border-l-2 border-blue-500/50">
-                            <span className="text-xs sm:text-sm font-medium text-blue-400">
-                              {shot.character}:
-                            </span>
-                            <span className="text-xs sm:text-sm ml-1">&quot;{shot.line}&quot;</span>
+                          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                            <input
+                              type="number"
+                              min={1}
+                              max={30}
+                              value={shot.duration || 5}
+                              onChange={(e) => updateShot(episode.episodeNumber - 1, shotIdx, "duration", Math.max(1, parseInt(e.target.value) || 5))}
+                              className="w-12 bg-muted/50 border border-border/30 rounded px-1.5 py-0.5 text-center text-xs focus:outline-none focus:border-emerald-500/50"
+                            />
+                            <span>秒</span>
                           </div>
-                        )}
-                        {shot.type === "narration" && shot.subtitle && (
-                          <p className="mt-1 text-xs sm:text-sm italic text-amber-300/80">
-                            {shot.subtitle}
-                          </p>
-                        )}
+                        </div>
+                        <div className="space-y-2">
+                          <div>
+                            <label className="text-[10px] text-muted-foreground/70 uppercase">画面描述</label>
+                            <textarea
+                              className="w-full text-xs sm:text-sm text-muted-foreground leading-relaxed bg-transparent border border-border/20 rounded p-2 resize-y min-h-[2rem] focus:outline-none focus:border-emerald-500/50"
+                              value={shot.visual}
+                              onChange={(e) => updateShot(episode.episodeNumber - 1, shotIdx, "visual", e.target.value)}
+                              rows={2}
+                            />
+                          </div>
+                          {shot.type === "dialogue" && shot.character && (
+                            <div className="pl-3 border-l-2 border-blue-500/50">
+                              <label className="text-[10px] text-muted-foreground/70 uppercase">台词</label>
+                              <textarea
+                                className="w-full text-xs sm:text-sm leading-relaxed bg-transparent border border-border/20 rounded p-2 resize-y min-h-[2rem] focus:outline-none focus:border-emerald-500/50 mt-1"
+                                value={shot.line || ""}
+                                onChange={(e) => updateShot(episode.episodeNumber - 1, shotIdx, "line", e.target.value)}
+                                rows={2}
+                              />
+                            </div>
+                          )}
+                          {shot.type === "narration" && (
+                            <div>
+                              <label className="text-[10px] text-muted-foreground/70 uppercase">旁白字幕</label>
+                              <textarea
+                                className="w-full text-xs sm:text-sm italic text-amber-300/80 bg-transparent border border-border/20 rounded p-2 resize-y min-h-[2rem] focus:outline-none focus:border-emerald-500/50 mt-1"
+                                value={shot.subtitle || ""}
+                                onChange={(e) => updateShot(episode.episodeNumber - 1, shotIdx, "subtitle", e.target.value)}
+                                rows={2}
+                              />
+                            </div>
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>
                 </section>
               ))}
             </div>
+
+            {/* Unsaved changes banner */}
+            {hasUnsavedChanges && (
+              <div className="sticky bottom-0 bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 flex items-center justify-between gap-3 mb-4">
+                <div className="flex items-center gap-2 text-sm text-amber-400">
+                  <AlertCircle className="h-4 w-4 shrink-0" />
+                  <span>有未保存的修改</span>
+                </div>
+                <Button
+                  onClick={handleSave}
+                  disabled={saving}
+                  size="sm"
+                  className="bg-emerald-600 hover:bg-emerald-500 min-h-[40px]"
+                >
+                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4 mr-1" />}
+                  保存剧本
+                </Button>
+              </div>
+            )}
 
             <div className="flex flex-col sm:flex-row justify-between gap-3 mt-8">
               <Link href="/create">
@@ -472,12 +566,23 @@ export default function ScriptPageContent() {
                   上一步
                 </Button>
               </Link>
-              <Link href={`/create/storyboard?dramaId=${dramaId}`}>
-                <Button className="bg-emerald-600 hover:bg-emerald-500 w-full sm:w-auto min-h-[44px]">
-                  下一步：生成分镜
-                  <ArrowRight className="h-4 w-4 ml-2" />
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  onClick={handleSave}
+                  disabled={saving || !hasUnsavedChanges}
+                  className="w-full sm:w-auto min-h-[44px]"
+                >
+                  {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
+                  保存修改
                 </Button>
-              </Link>
+                <Link href={`/create/storyboard?dramaId=${dramaId}`}>
+                  <Button className="bg-emerald-600 hover:bg-emerald-500 w-full sm:w-auto min-h-[44px]">
+                    下一步：生成分镜
+                    <ArrowRight className="h-4 w-4 ml-2" />
+                  </Button>
+                </Link>
+              </div>
             </div>
           </>
         ) : episodes.length > 0 ? (
