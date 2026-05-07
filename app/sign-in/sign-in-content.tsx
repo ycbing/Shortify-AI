@@ -34,8 +34,7 @@ export default function SignInContent() {
       if (result?.error) {
         setError("邮箱或密码错误");
       } else {
-        router.push(callbackUrl);
-        router.refresh();
+        window.location.href = callbackUrl;
       }
     } catch {
       setError("登录失败，请稍后重试");
