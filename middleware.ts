@@ -10,7 +10,8 @@ export async function middleware(request: NextRequest) {
   const isPublicRoute =
     pathname === "/" ||
     pathname.startsWith("/api") ||
-    pathname.startsWith("/view/");
+    pathname.startsWith("/view/") ||
+    pathname === "/gallery";
 
   if (isPublicRoute) {
     return NextResponse.next();
