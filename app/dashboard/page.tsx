@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Plus, Loader2, Trash2, Copy, Pencil, Film, Check, Settings } from "lucide-react";
+import { Plus, Loader2, Trash2, Copy, Pencil, Film, Check, Settings, Search, LayoutGrid, List, ArrowUpDown } from "lucide-react";
 import { GeneratingProgressBadge } from "@/components/drama/generating-progress-badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { DramaWithEpisodes } from "@/types/drama";
@@ -33,6 +33,9 @@ export default function DashboardPage() {
   const [deleteTarget, setDeleteTarget] = useState<DramaWithEpisodes | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [copying, setCopying] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const [sortBy, setSortBy] = useState<"newest" | "updated" | "shares">("newest");
 
   const fetchDramas = useCallback(async () => {
     try {
@@ -128,6 +131,23 @@ export default function DashboardPage() {
     );
   }
 
+  // Filter + search + sort
+  const filteredDramas = dramas
+    .filter((d) => {
+      if (search && !d.title.toLowerCase().includes(search.toLowerCase())) return false;
+      return true;
+    })
+    .sort((a, b) => {
+      if (sortBy === "updated") return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+      if (sortBy === "shares") return (b.shareCount || 0) - (a.shareCount || 0);
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+
+  // Stats
+  const totalDramas = dramas.length;
+  const completedDramas = dramas.filter((d) => d.status === "completed").length;
+  const generatingDramas = dramas.filter((d) => d.status === "generating").length;
+
   const filterButtons = [
     { key: "all", label: "全部" },
     { key: "draft", label: "草稿" },
@@ -166,6 +186,57 @@ export default function DashboardPage() {
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-4 sm:py-6">
+        {/* Stats cards */}
+        <div className="grid grid-cols-3 gap-3 mb-4 sm:mb-6">
+          <div className="border border-border/50 rounded-lg p-3 bg-card/50">
+            <p className="text-xl sm:text-2xl font-bold">{totalDramas}</p>
+            <p className="text-xs text-muted-foreground">总作品</p>
+          </div>
+          <div className="border border-border/50 rounded-lg p-3 bg-card/50">
+            <p className="text-xl sm:text-2xl font-bold text-emerald-400">{completedDramas}</p>
+            <p className="text-xs text-muted-foreground">已完成</p>
+          </div>
+          <div className="border border-border/50 rounded-lg p-3 bg-card/50">
+            <p className="text-xl sm:text-2xl font-bold text-amber-400">{generatingDramas}</p>
+            <p className="text-xs text-muted-foreground">生成中</p>
+          </div>
+        </div>
+
+        {/* Search + Sort + View toggle */}
+        <div className="flex flex-col sm:flex-row gap-2 mb-4 sm:mb-6">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <input
+              type="text"
+              placeholder="搜索短剧标题..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full bg-muted/30 border border-border/50 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-emerald-500/50 min-h-[44px]"
+            />
+          </div>
+          <div className="flex gap-2">
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+              className="bg-muted/30 border border-border/50 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500/50 min-h-[44px] cursor-pointer"
+            >
+              <option value="newest">最新创建</option>
+              <option value="updated">最近更新</option>
+              <option value="shares">最多分享</option>
+            </select>
+            <div className="flex border border-border/50 rounded-lg overflow-hidden">
+              <button
+                onClick={() => setViewMode("grid")}
+                className={`p-2 min-h-[44px] min-w-[44px] ${viewMode === "grid" ? "bg-emerald-600 text-white" : "text-muted-foreground hover:text-foreground"}`}
+              ><LayoutGrid className="h-4 w-4" /></button>
+              <button
+                onClick={() => setViewMode("list")}
+                className={`p-2 min-h-[44px] min-w-[44px] ${viewMode === "list" ? "bg-emerald-600 text-white" : "text-muted-foreground hover:text-foreground"}`}
+              ><List className="h-4 w-4" /></button>
+            </div>
+          </div>
+        </div>
+
         {/* Filters — horizontally scrollable on mobile */}
         <div className="flex gap-2 mb-4 sm:mb-6 overflow-x-auto pb-2 sm:pb-0 -mx-4 px-4 sm:mx-0 sm:px-0">
           {filterButtons.map((f) => (
@@ -186,50 +257,36 @@ export default function DashboardPage() {
         </div>
 
         {/* Drama grid — single column on mobile */}
-        {dramas.length === 0 ? (
+        {filteredDramas.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-center">
-            <span className="text-5xl mb-4">🎬</span>
-            <h3 className="text-lg font-semibold mb-2">还没有短剧</h3>
+            <span className="text-5xl mb-4">{search ? "🔍" : "🎬"}</span>
+            <h3 className="text-lg font-semibold mb-2">{search ? "没有找到匹配的短剧" : "还没有短剧"}</h3>
             <p className="text-sm text-muted-foreground mb-6">
-              点击「创建短剧」开始你的创作之旅
+              {search ? "试试其他关键词，或创建一个新短剧" : "点击「创建短剧」开始你的创作之旅"}
             </p>
-
-            {/* Onboarding guide for new users */}
-            <div className="max-w-md w-full space-y-4 text-left mt-4">
-              <div className="flex items-start gap-3 p-4 border border-border/50 rounded-lg bg-card/50">
-                <div className="w-8 h-8 rounded-full bg-emerald-500/10 flex items-center justify-center shrink-0 text-emerald-400 text-sm font-bold">1</div>
-                <div>
-                  <p className="text-sm font-medium">输入创意</p>
-                  <p className="text-xs text-muted-foreground">描述你的短剧主题、类型和风格</p>
-                </div>
-              </div>
-              <div className="flex items-start gap-3 p-4 border border-border/50 rounded-lg bg-card/50">
-                <div className="w-8 h-8 rounded-full bg-emerald-500/10 flex items-center justify-center shrink-0 text-emerald-400 text-sm font-bold">2</div>
-                <div>
-                  <p className="text-sm font-medium">AI 生成剧本</p>
-                  <p className="text-xs text-muted-foreground">AI 自动创作完整分集剧本</p>
-                </div>
-              </div>
-              <div className="flex items-start gap-3 p-4 border border-border/50 rounded-lg bg-card/50">
-                <div className="w-8 h-8 rounded-full bg-emerald-500/10 flex items-center justify-center shrink-0 text-emerald-400 text-sm font-bold">3</div>
-                <div>
-                  <p className="text-sm font-medium">配音与合成</p>
-                  <p className="text-xs text-muted-foreground">生成配音、合成视频、导出作品</p>
-                </div>
-              </div>
-
-              <Link href="/create" className="block pt-2">
-                <Button className="w-full bg-emerald-600 hover:bg-emerald-500 min-h-[44px]">
-                  <Plus className="h-4 w-4 mr-2" />
-                  立即开始创作
-                </Button>
-              </Link>
-            </div>
+            <Link href="/create" className="block pt-2">
+              <Button className="w-full bg-emerald-600 hover:bg-emerald-500 min-h-[44px]">
+                <Plus className="h-4 w-4 mr-2" />
+                立即开始创作
+              </Button>
+            </Link>
+          </div>
+        ) : viewMode === "grid" ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
+            {filteredDramas.map((drama) => (
+              <DramaCardWithActions
+                key={drama.id}
+                drama={drama}
+                onDelete={() => setDeleteTarget(drama)}
+                onCopy={() => handleCopy(drama)}
+                copying={copying === drama.id}
+              />
+            ))}
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
-            {dramas.map((drama) => (
-              <DramaCardWithActions
+          <div className="space-y-2">
+            {filteredDramas.map((drama) => (
+              <DramaListItem
                 key={drama.id}
                 drama={drama}
                 onDelete={() => setDeleteTarget(drama)}
@@ -427,6 +484,69 @@ function DramaCardWithActions({ drama, onDelete, onCopy, copying }: DramaCardPro
             <Trash2 className="h-3 w-3" />
           </Button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// --- Compact list view item ---
+function DramaListItem({ drama, onDelete, onCopy, copying }: DramaCardProps) {
+  const status = DRAMA_STATUS_META[drama.status] || DRAMA_STATUS_META.draft;
+  const dramaEpisodes = drama.episodes || [];
+  const completedSteps = getCompletedDramaSteps(drama.status, dramaEpisodes);
+  const editorUrl = getDramaEditorPath(drama.id, dramaEpisodes, drama.status);
+  const dramaCompleted = drama.status === "completed";
+
+  const toImgUrl = (p: string | null) => {
+    if (!p) return null;
+    if (p.includes(".cos.")) {
+      try {
+        const u = new URL(p);
+        return `/api/uploads/cos/${encodeURIComponent(u.pathname.slice(1))}`;
+      } catch { return p; }
+    }
+    if (p.startsWith("http")) return p;
+    return `/api/uploads/${p.replace(/^\.?\/?uploads\/?/, "")}`;
+  };
+
+  const coverSrc = toImgUrl(drama.coverUrl) || toImgUrl(dramaEpisodes[0]?.imageUrl || null);
+
+  return (
+    <div className="group flex items-center gap-3 sm:gap-4 border border-border/50 rounded-lg p-3 bg-card/50 hover:border-emerald-500/50 hover:bg-card/80 transition-all">
+      <Link href={dramaCompleted ? `/view/${drama.id}` : editorUrl} className="shrink-0">
+        <div className="w-20 h-12 sm:w-28 sm:h-16 rounded overflow-hidden bg-muted">
+          {coverSrc ? (
+            <img src={coverSrc} alt={drama.title} className="w-full h-full object-cover" />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-zinc-800 to-zinc-900">
+              <Film className="h-5 w-5 text-muted-foreground/50" />
+            </div>
+          )}
+        </div>
+      </Link>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <h3 className="font-semibold text-sm truncate hover:text-emerald-400 transition">{drama.title}</h3>
+          <span className="text-[10px] bg-muted px-1.5 py-0.5 rounded shrink-0">{status.label}</span>
+        </div>
+        <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5">
+          <span>{dramaEpisodes.length} 集</span>
+          <span>{new Date(drama.createdAt).toLocaleDateString("zh-CN")}</span>
+          {dramaEpisodes.length > 0 && drama.status !== "draft" && (
+            <div className="hidden sm:flex items-center gap-1">
+              {DRAMA_PROGRESS_STEPS.map((step) => (
+                <span key={step.key} className={`text-[10px] ${completedSteps.has(step.key) ? "text-emerald-400" : "text-zinc-600"}`}>
+                {completedSteps.has(step.key) ? <Check className="h-3 w-3" /> : <span className="h-1.5 w-1.5 rounded-full bg-zinc-700 inline-block" />}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="flex items-center gap-1.5 shrink-0">
+        <Link href={editorUrl}><Button variant="ghost" size="sm" className="min-h-[40px] min-w-[40px] px-2"><Pencil className="h-3.5 w-3.5" /></Button></Link>
+        <Button variant="ghost" size="sm" onClick={onCopy} disabled={copying} className="min-h-[40px] min-w-[40px] px-2">{copying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Copy className="h-3.5 w-3.5" />}</Button>
+        <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); onDelete(); }} className="min-h-[40px] min-w-[40px] px-2 text-red-400 hover:text-red-300 hover:bg-red-500/10"><Trash2 className="h-3.5 w-3.5" /></Button>
       </div>
     </div>
   );

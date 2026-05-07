@@ -4,7 +4,7 @@
 
 import { db } from "@/lib/db";
 import { dramas, episodes } from "@/lib/db/schema";
-import { eq, desc, sql } from "drizzle-orm";
+import { eq, desc, sql, like, and } from "drizzle-orm";
 
 /** Drama statuses that are considered publicly visible */
 export const PUBLIC_DRAMA_STATUSES = new Set(["completed", "storyboard_ready", "voiceover_ready"]);
@@ -25,11 +25,19 @@ export interface PublicDramaWithEpisodes extends PublicDrama {
 }
 
 /**
- * Fetch paginated completed (public) dramas.
- * Only returns safe/public fields — no userId, description, theme, characters, etc.
+ * Fetch paginated completed (public) dramas with optional genre/keyword filters.
  */
-export async function getPublicDramas(page = 1, pageSize = 12) {
+export async function getPublicDramas(
+  page = 1,
+  pageSize = 12,
+  filters?: { genre?: string; keyword?: string }
+) {
   const offset = (page - 1) * pageSize;
+
+  const conditions = [eq(dramas.status, "completed")];
+  if (filters?.genre) conditions.push(eq(dramas.genre, filters.genre));
+  if (filters?.keyword) conditions.push(like(dramas.title, `%${filters.keyword}%`));
+  const whereClause = and(...conditions);
 
   const rows = await db
     .select({
@@ -43,16 +51,15 @@ export async function getPublicDramas(page = 1, pageSize = 12) {
       createdAt: dramas.createdAt,
     })
     .from(dramas)
-    .where(eq(dramas.status, "completed"))
+    .where(whereClause)
     .orderBy(desc(dramas.createdAt))
     .limit(pageSize)
     .offset(offset);
 
-  // Count total
   const [{ count }] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(dramas)
-    .where(eq(dramas.status, "completed"));
+    .where(whereClause);
 
   return { dramas: rows, total: count, page, pageSize };
 }
@@ -84,7 +91,6 @@ export async function getLatestPublicDramas(limit = 3) {
  */
 export function toPublicCoverUrl(url: string | null): string | null {
   if (!url) return null;
-  // COS private bucket URL → route through signed proxy
   if (url.includes(".cos.") && url.startsWith("http")) {
     try {
       const u = new URL(url);
@@ -94,8 +100,6 @@ export function toPublicCoverUrl(url: string | null): string | null {
       return url;
     }
   }
-  // External URLs — return as-is
   if (url.startsWith("http")) return url;
-  // Local relative path
   return `/api/uploads/${url.replace(/^\.?\/?uploads\/?/, "")}`;
 }

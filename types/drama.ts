@@ -117,7 +117,9 @@ export interface DramaWithEpisodes {
   style: string | null;
   status: string;
   coverUrl: string | null;
+  shareCount: number | null;
   createdAt: Date;
+  updatedAt: Date;
   episodes: {
     id: string;
     episodeNumber: number;

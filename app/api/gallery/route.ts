@@ -6,8 +6,10 @@ export async function GET(req: NextRequest) {
     const { searchParams } = req.nextUrl;
     const page = Math.max(1, Number(searchParams.get("page")) || 1);
     const pageSize = Math.min(50, Math.max(1, Number(searchParams.get("pageSize")) || 12));
+    const genre = searchParams.get("genre") || undefined;
+    const keyword = searchParams.get("keyword") || undefined;
 
-    const { dramas, total } = await getPublicDramas(page, pageSize);
+    const { dramas, total } = await getPublicDramas(page, pageSize, { genre, keyword });
 
     const processed = dramas.map((d) => ({
       ...d,
