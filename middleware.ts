@@ -1,10 +1,10 @@
+import { getToken } from "next-auth/jwt";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { auth } from "@/lib/auth";
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const session = await auth();
+  const token = await getToken({ req: request, secret: process.env.NEXTAUTH_SECRET });
 
   // Public routes — always allow
   const isPublicRoute =
@@ -25,14 +25,14 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith("/sign-up/");
 
   if (isAuthRoute) {
-    if (session) {
+    if (token) {
       return NextResponse.redirect(new URL("/dashboard", request.url));
     }
     return NextResponse.next();
   }
 
   // All other routes require authentication
-  if (!session) {
+  if (!token) {
     const signInUrl = new URL("/sign-in", request.url);
     signInUrl.searchParams.set("callbackUrl", pathname);
     return NextResponse.redirect(signInUrl);
