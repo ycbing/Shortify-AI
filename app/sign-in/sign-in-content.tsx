@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { signIn } from "next-auth/react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,7 +11,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Film, Loader2 } from "lucide-react";
 
 export default function SignInContent() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const callbackUrl = searchParams.get("callbackUrl") || "/dashboard";
   const [email, setEmail] = useState("");
@@ -24,23 +23,16 @@ export default function SignInContent() {
     setError("");
     setLoading(true);
 
-    try {
-      const result = await signIn("credentials", {
-        email,
-        password,
-        redirect: false,
-      });
+    // Use redirect=true — NextAuth handles the full redirect flow including session cookie
+    await signIn("credentials", {
+      email,
+      password,
+      callbackUrl,
+    });
 
-      if (result?.error) {
-        setError("邮箱或密码错误");
-      } else {
-        window.location.href = callbackUrl;
-      }
-    } catch {
-      setError("登录失败，请稍后重试");
-    } finally {
-      setLoading(false);
-    }
+    // If signIn returns (shouldn't with redirect=true), show error
+    setLoading(false);
+    setError("登录失败，请检查邮箱和密码");
   };
 
   return (
