@@ -161,6 +161,11 @@ export default function DashboardPage() {
       <header className="border-b border-border/50 bg-background/80 backdrop-blur-xl sticky top-0 z-40">
         <div className="mx-auto max-w-7xl flex items-center justify-between px-4 h-14 sm:h-16">
           <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+            <Link href="/" className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground transition shrink-0" title="返回首页">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>
+              <span className="text-sm hidden sm:inline">首页</span>
+            </Link>
+            <span className="text-muted-foreground/30 hidden sm:inline">/</span>
             <h1 className="text-base sm:text-lg font-bold truncate">我的短剧</h1>
             {session?.user && (
               <span className="text-xs sm:text-sm text-muted-foreground hidden sm:inline">

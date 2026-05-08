@@ -475,7 +475,7 @@ async function processVideos(
         try {
           const outputDir = path.join(uploadDir, "videos", dramaId, `episode-${epNum}-ai`);
 
-        // Find subtitle file
+        // Find or generate subtitle file
         let subtitlePath: string | null = null;
         const srtPath = path.join(uploadDir, "subtitles", dramaId, `episode-${epNum}.srt`);
         try {
@@ -487,6 +487,24 @@ async function processVideos(
               await fs.access(episode.subtitleUrl);
               subtitlePath = episode.subtitleUrl;
             } catch { /* not found */ }
+          }
+        }
+
+        // If no subtitle file exists yet, generate one from shot data
+        if (!subtitlePath && shots && shots.length > 0) {
+          try {
+            const shotAudios = shots.map((shot: any) => ({
+              shotNumber: shot.shotNumber,
+              duration: shot.duration || 5,
+              audioUrl: "",
+              type: shot.type === "dialogue" ? "dialogue" : "narration",
+              character: shot.character,
+            }));
+            const { generateSubtitles } = require("@/lib/ai/subtitle-generator");
+            subtitlePath = await generateSubtitles(shots, shotAudios, dramaId, epNum);
+            console.log(`Episode ${epNum}: generated missing subtitles: ${subtitlePath}`);
+          } catch (err) {
+            console.warn(`Episode ${epNum}: subtitle generation failed`, err);
           }
         }
 

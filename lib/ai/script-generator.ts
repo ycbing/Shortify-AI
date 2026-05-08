@@ -46,7 +46,7 @@ export async function generateScript(
 1. **集数**: 共 ${episodeCount} 集
 2. **每集时长**: 30-60 秒（由 shots 累计时长决定）
 3. **shots**: 每集由多个镜头(shots)组成，每个 shot 3-8 秒
-4. **角色对话**: 必须有角色对话（不只是旁白），对话要有冲突、悬念、情感张力
+4. **角色对话优先**: 每集 shots 中 dialogue（角色对话）占比必须 ≥ 60%，旁白 narration 仅用于过渡和背景说明。对话要有冲突、悬念、情感张力，尽量用角色对话推进剧情，减少旁白解说
 5. **角色外貌**: 描述要详细且一致（同一角色在所有镜头中描述一致）
 6. **sceneDescription**: 要详细到可以直接生成图片，包含场景、光线、构图
 7. **角色对话用引号**，旁白/字幕描述用括号
@@ -122,6 +122,7 @@ suspense(悬疑), romantic(浪漫), tense(紧张), calm(平静), dramatic(戏剧
 - narration 类型的 shot 必须有 subtitle（字幕文本），不需要 voiceId
 - 同一角色在所有镜头中的 voiceId 必须一致，appearance 描述也必须一致
 - 每集至少 5-10 个 shots，总时长 30-60 秒
+- **对话比例要求（极其重要）**: 每集的 shots 中，dialogue 类型必须占 60% 以上，narration 最多不超过 40%。用角色之间的对话推进剧情，避免大量旁白
 - sceneDescription 中要包含完整的环境描述，画风：${STYLE_IMAGE_PROMPT[style]}
 - **内容安全规则（重要）**：
   - visual 描述中避免使用暴力、血腥、恐怖、武器、犯罪、死亡等敏感词汇
