@@ -194,6 +194,20 @@ export async function POST(request: NextRequest) {
           `生成分镜 - 第${episode.episodeNumber}集`
         );
 
+        // Inject shot-level imageUrl back into shot_data
+        if (shotResult.shotImages && shotResult.shotImages.length > 0) {
+          const updatedShotData = (Array.isArray(episode.shotData) ? episode.shotData : []).map(
+            (shot: Shot) => {
+              const matched = shotResult.shotImages!.find(s => s.shotNumber === shot.shotNumber);
+              return matched?.imageUrl ? { ...shot, imageUrl: matched.imageUrl } : shot;
+            }
+          );
+          await db
+            .update(episodes)
+            .set({ imageUrl: shotResult.imageUrl, shotData: updatedShotData })
+            .where(eq(episodes.id, episode.id));
+        }
+
         return NextResponse.json(shotResult);
       }
 
@@ -350,10 +364,24 @@ async function processStoryboardGeneration({
             );
             creditsUsed += CREDIT_COSTS.storyboard;
 
-            await db
-              .update(episodes)
-              .set({ imageUrl: result.imageUrl })
-              .where(eq(episodes.id, episode.id));
+            // Inject shot-level imageUrl back into shot_data
+            if (result.shotImages && result.shotImages.length > 0) {
+              const updatedShotData = (Array.isArray(episode.shotData) ? episode.shotData : []).map(
+                (shot: Shot) => {
+                  const matched = result.shotImages!.find(s => s.shotNumber === shot.shotNumber);
+                  return matched?.imageUrl ? { ...shot, imageUrl: matched.imageUrl } : shot;
+                }
+              );
+              await db
+                .update(episodes)
+                .set({ imageUrl: result.imageUrl, shotData: updatedShotData })
+                .where(eq(episodes.id, episode.id));
+            } else {
+              await db
+                .update(episodes)
+                .set({ imageUrl: result.imageUrl })
+                .where(eq(episodes.id, episode.id));
+            }
           }
 
           results.push(result);

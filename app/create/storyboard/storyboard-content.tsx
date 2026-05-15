@@ -31,6 +31,7 @@ interface StoryboardItem {
     character?: string;
     line?: string;
     subtitle?: string;
+    imageUrl?: string | null;
     aiVideoUrl?: string | null;
   }>;
 }
@@ -67,20 +68,28 @@ export default function StoryboardPageContent() {
       const res = await fetch(`/api/dramas/${dramaId}`);
       if (res.ok) {
         const data = await res.json();
+        const toPublicUrl = (p: string | null | undefined): string | null => {
+          if (!p) return null;
+          if (p.includes(".cos.") && p.startsWith("http")) {
+            try { const u = new URL(p); return `/api/uploads/cos/${encodeURIComponent(u.pathname.slice(1))}`; } catch { return p; }
+          }
+          if (p.startsWith("http")) return p;
+          return `/api/uploads/${p.replace(/^\.?\/?uploads\/?/, "")}`;
+        };
         setItems(
           data.episodes.map((ep: DramaEpisodeResponse) => ({
             id: ep.id,
             episodeNumber: ep.episodeNumber,
             title: ep.title || `第${ep.episodeNumber}集`,
-            imageUrl: ep.imageUrl
-              ? ep.imageUrl.includes(".cos.") && ep.imageUrl.startsWith("http")
-                ? (() => { try { const u = new URL(ep.imageUrl); return `/api/uploads/cos/${encodeURIComponent(u.pathname.slice(1))}`; } catch { return ep.imageUrl; } })()
-                : ep.imageUrl.startsWith("http")
-                ? ep.imageUrl
-                : `/api/uploads/${ep.imageUrl.replace(/^\.?\/?uploads\/?/, "")}`
-              : null,
+            imageUrl: toPublicUrl(ep.imageUrl),
             narration: ep.narrationText || "",
-            shotData: Array.isArray(ep.shotData) ? ep.shotData : undefined,
+            shotData: Array.isArray(ep.shotData)
+              ? ep.shotData.map((s) => ({
+                  ...s,
+                  imageUrl: toPublicUrl((s as Record<string, unknown>).imageUrl as string | null),
+                  aiVideoUrl: toPublicUrl(s.aiVideoUrl as string | null | undefined),
+                }))
+              : undefined,
           }))
         );
       }
@@ -466,6 +475,7 @@ export default function StoryboardPageContent() {
                           character={shot.character}
                           line={shot.line}
                           subtitle={shot.subtitle}
+                          imageUrl={shot.imageUrl}
                           aiVideoUrl={shot.aiVideoUrl}
                           onRegenerateImage={() => handleRegenerate(item.episodeNumber)}
                         />
