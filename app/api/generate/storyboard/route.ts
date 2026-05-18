@@ -23,6 +23,7 @@ import {
 } from "@/lib/generation";
 import { tryAcquireUserSlot, releaseUserSlot, getUserActiveCount } from "@/lib/resilience";
 import { createLogger } from "@/lib/logger";
+import { storyboardSchema } from "@/lib/validation";
 
 const log = createLogger("storyboard-api");
 
@@ -73,6 +74,58 @@ function buildAppearancePrompt(
   return `${appearanceDescs}。${shot.visual}`;
 }
 
+/**
+ * Find characters referenced in a shot by dialogue or visual description.
+ */
+function findCharactersInShot(
+  shot: Shot,
+  characters: Character[]
+): Character[] {
+  const found: Character[] = [];
+
+  if (shot.type === "dialogue" && shot.character) {
+    const char = characters.find((c) => c.name === shot.character);
+    if (char) found.push(char);
+  }
+
+  for (const char of characters) {
+    if (
+      !found.includes(char) &&
+      char.name &&
+      shot.visual?.includes(char.name)
+    ) {
+      found.push(char);
+    }
+  }
+
+  return found;
+}
+
+/**
+ * Build character reference list for Kling API from the refMap.
+ */
+function buildShotCharacterRefs(
+  shot: Shot,
+  characters: Character[],
+  refMap: Map<string, string>
+): { imageUrl: string; type: "face" | "full_body"; characterName: string }[] {
+  const refs: { imageUrl: string; type: "face" | "full_body"; characterName: string }[] = [];
+  const shotChars = findCharactersInShot(shot, characters);
+
+  for (const c of shotChars) {
+    const refUrl = refMap.get(c.name);
+    if (refUrl) {
+      refs.push({
+        imageUrl: refUrl,
+        type: "face",
+        characterName: c.name,
+      });
+    }
+  }
+
+  return refs;
+}
+
 export async function POST(request: NextRequest) {
   let taskId: string | null = null;
   let dramaId: string | null = null;
@@ -83,12 +136,17 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    dramaId = body.dramaId;
-    const { episodeId } = body;
-
-    if (!dramaId) {
-      return NextResponse.json({ error: "缺少 dramaId" }, { status: 400 });
+    const parsed = storyboardSchema.safeParse(body);
+    if (!parsed.success) {
+      const firstIssue = parsed.error.issues?.[0];
+      return NextResponse.json(
+        { error: firstIssue?.message || "请求参数无效" },
+        { status: 400 }
+      );
     }
+
+    dramaId = parsed.data.dramaId;
+    const episodeId = parsed.data.episodeId;
 
     const drama = await getOwnedDrama(dramaId, session.user.id);
 
@@ -122,7 +180,11 @@ export async function POST(request: NextRequest) {
       // V2: shot-based image generation
       if (episode.shotData && Array.isArray(episode.shotData)) {
         const characters: Character[] = Array.isArray(drama.characters) ? drama.characters : [];
-        const shotResult = await handleShotStoryboard(episode, drama.style, dramaId, uploadDir, characters);
+        const refMap = new Map<string, string>();
+        for (const c of characters) {
+          if (c.referenceImageUrl) refMap.set(c.name, c.referenceImageUrl);
+        }
+        const shotResult = await handleShotStoryboard(episode, drama.style, dramaId, uploadDir, characters, refMap);
 
         await requireCreditDeduction(
           session.user.id,
@@ -249,6 +311,11 @@ async function processStoryboardGeneration({
   let creditsUsed = 0;
 
   try {
+    const refMap = new Map<string, string>();
+    for (const c of characters) {
+      if (c.referenceImageUrl) refMap.set(c.name, c.referenceImageUrl);
+    }
+
     for (const episode of allEpisodes) {
       await throwIfGenerationTaskCancelled(taskId);
 
@@ -268,6 +335,7 @@ async function processStoryboardGeneration({
             dramaId,
             uploadDir,
             characters,
+            refMap,
             false
           );
           await throwIfGenerationTaskCancelled(taskId);
@@ -393,23 +461,33 @@ async function handleShotStoryboard(
   dramaId: string,
   uploadDir: string,
   characters: Character[] = [],
+  refMap: Map<string, string> = new Map(),
   persistEpisodeImage: boolean = true
 ): Promise<{ episodeNumber: number; imageUrl: string; shotImages: { shotNumber: number; imageUrl: string }[] }> {
   const shots = episode.shotData as unknown as Shot[];
   const shotImages: { shotNumber: number; imageUrl: string }[] = [];
 
-  // Generate image for each shot's visual description
   for (const shot of shots) {
     try {
-      // Build appearance-enriched prompt for consistent character look
       const enrichedPrompt = buildAppearancePrompt(shot, characters);
+
+      const characterReferences = buildShotCharacterRefs(shot, characters, refMap);
 
       const imageUrl = await generateImage(
         enrichedPrompt,
-        style || "realistic"
+        style || "realistic",
+        "1728x960",
+        { characterReferences: characterReferences.length > 0 ? characterReferences : undefined }
       );
 
-      // Download image to local storage
+      // First time a character appears in a shot, save the image as their reference
+      const shotChars = findCharactersInShot(shot, characters);
+      for (const c of shotChars) {
+        if (!refMap.has(c.name)) {
+          refMap.set(c.name, imageUrl);
+        }
+      }
+
       const savePath = path.join(
         uploadDir,
         "images",
@@ -424,7 +502,6 @@ async function handleShotStoryboard(
         const buffer = Buffer.from(await response.arrayBuffer());
         await fs.writeFile(savePath, buffer);
 
-        // Upload to COS if configured
         const cosKey = imageCosKey(dramaId, episode.episodeNumber, shot.shotNumber);
         const finalUrl = await uploadFileToCos(savePath, cosKey);
         shotImages.push({ shotNumber: shot.shotNumber, imageUrl: finalUrl });
@@ -437,7 +514,6 @@ async function handleShotStoryboard(
     }
   }
 
-  // Use first shot image as episode image
   const firstImageUrl = shotImages.find((s) => s.imageUrl)?.imageUrl || "";
 
   if (persistEpisodeImage) {
@@ -446,6 +522,18 @@ async function handleShotStoryboard(
       .set({ imageUrl: firstImageUrl || null })
       .where(eq(episodes.id, episode.id));
   }
+
+  // Persist character reference images to drama record
+  const mergedCharacters = characters.map((c) => ({
+    ...c,
+    referenceImageUrl: refMap.has(c.name)
+      ? refMap.get(c.name)!
+      : c.referenceImageUrl,
+  }));
+  await db
+    .update(dramas)
+    .set({ characters: mergedCharacters as any })
+    .where(eq(dramas.id, dramaId));
 
   return {
     episodeNumber: episode.episodeNumber,

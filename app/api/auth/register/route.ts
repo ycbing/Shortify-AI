@@ -4,24 +4,32 @@ import { db } from "@/lib/db";
 import { users, userPasswords } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { INITIAL_USER_CREDITS } from "@/lib/constants";
+import { registerSchema } from "@/lib/validation";
+import { checkRateLimit } from "@/lib/rate-limiter";
 
 export async function POST(request: NextRequest) {
   try {
-    const { email, password, name } = await request.json();
-
-    if (!email || !password) {
+    // Rate limit: 5 registrations per IP per hour
+    const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+    const limit = checkRateLimit(`register:${ip}`, 5, 3600_000);
+    if (!limit.allowed) {
       return NextResponse.json(
-        { error: "邮箱和密码不能为空" },
+        { error: "注册过于频繁，请稍后再试" },
+        { status: 429 }
+      );
+    }
+
+    const body = await request.json();
+    const parsed = registerSchema.safeParse(body);
+    if (!parsed.success) {
+      const firstIssue = parsed.error.issues?.[0];
+      return NextResponse.json(
+        { error: firstIssue?.message || "请求参数无效" },
         { status: 400 }
       );
     }
 
-    if (password.length < 6) {
-      return NextResponse.json(
-        { error: "密码至少6位" },
-        { status: 400 }
-      );
-    }
+    const { email, password, name } = parsed.data;
 
     // Check if user exists
     const existing = await db

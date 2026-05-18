@@ -9,6 +9,7 @@ import type { DramaGenreType, DramaStyleType, GeneratedScriptV2 } from "@/types/
 import { checkCredits, CREDIT_COSTS, requireCreditDeduction } from "@/lib/credits";
 import { getOwnedDrama } from "@/lib/dramas";
 import { updateDramaStatus } from "@/lib/drama-status";
+import { generateScriptSchema } from "@/lib/validation";
 import {
   completeGenerationTask,
   createOrReuseGenerationTask,
@@ -27,13 +28,17 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    dramaId = body.dramaId;
-
-    if (!dramaId) {
-      return NextResponse.json({ error: "缺少 dramaId" }, { status: 400 });
+    const parsed = generateScriptSchema.safeParse(body);
+    if (!parsed.success) {
+      const firstIssue = parsed.error.issues?.[0];
+      return NextResponse.json(
+        { error: firstIssue?.message || "请求参数无效" },
+        { status: 400 }
+      );
     }
 
-    // Get drama
+    dramaId = parsed.data.dramaId;
+
     const drama = await getOwnedDrama(dramaId, session.user.id);
 
     if (!drama) {

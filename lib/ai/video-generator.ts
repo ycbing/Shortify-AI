@@ -1,4 +1,6 @@
 import { getStyleImagePrompt } from "./script-generator";
+import { generateVideoWithKling } from "./kling-client";
+import type { KlingCharacterReference } from "./kling-client";
 import path from "path";
 import fs from "fs/promises";
 import { createLogger } from "@/lib/logger";
@@ -48,6 +50,48 @@ export interface VideoGenerationOptions {
   maxRetries?: number;
   /** 重试间隔基数（毫秒），默认 2000，每次重试指数退避 */
   retryBaseMs?: number;
+}
+
+export interface GenerateVideoOptions {
+  characterReference?: KlingCharacterReference;
+  quality?: "quality" | "speed";
+  size?: string;
+}
+
+/**
+ * Unified video generation that routes to Kling or CogVideoX.
+ * Uses Kling when configured and character references are available.
+ */
+export async function generateVideo(
+  prompt: string,
+  imageUrl: string,
+  style?: string,
+  options?: GenerateVideoOptions
+): Promise<{ videoUrl: string; coverUrl?: string }> {
+  const klingConfigured =
+    process.env.KLING_ACCESS_KEY && process.env.KLING_SECRET_KEY;
+  const hasCharRef = options?.characterReference?.imageUrl;
+
+  if (hasCharRef && klingConfigured) {
+    log.info("Using Kling for video generation with character reference");
+    return generateVideoWithKling(
+      prompt,
+      imageUrl,
+      options!.characterReference
+    );
+  }
+
+  if (process.env.VIDEO_PROVIDER === "kling" && klingConfigured) {
+    log.info("Using Kling for video generation");
+    return generateVideoWithKling(prompt, imageUrl);
+  }
+
+  // CogVideoX path (submit + poll)
+  const { taskId } = await submitVideoGeneration(prompt, imageUrl, style, {
+    quality: options?.quality,
+    size: options?.size,
+  });
+  return waitForVideoCompletion(taskId);
 }
 
 /**

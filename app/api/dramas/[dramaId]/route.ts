@@ -6,6 +6,16 @@ import { eq } from "drizzle-orm";
 import { getOwnedDrama } from "@/lib/dramas";
 import { PUBLIC_DRAMA_STATUSES } from "@/lib/public-dramas";
 
+const ALLOWED_DRAMA_FIELDS = new Set([
+  "title", "description", "theme", "genre", "style",
+  "episodeCount", "bgmUrl", "coverUrl", "characters",
+]);
+
+const ALLOWED_EPISODE_FIELDS = new Set([
+  "title", "shotData", "scriptContent", "duration",
+  "imageUrl", "voiceoverUrl", "videoUrl", "subtitleUrl",
+]);
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ dramaId: string }> }
@@ -72,9 +82,16 @@ export async function PUT(
 
     // If episodes data is provided, update episodes table
     if (body.episodes && Array.isArray(body.episodes)) {
-      const { episodes: episodesData, ...dramaFields } = body;
+      const { episodes: episodesData, ...rawDramaFields } = body;
 
-      // Update drama fields if any (e.g. characters)
+      // Whitelist drama-level fields
+      const dramaFields: Record<string, unknown> = {};
+      for (const key of Object.keys(rawDramaFields)) {
+        if (ALLOWED_DRAMA_FIELDS.has(key)) {
+          dramaFields[key] = rawDramaFields[key];
+        }
+      }
+
       if (Object.keys(dramaFields).length > 0) {
         await db
           .update(dramas)
@@ -85,28 +102,20 @@ export async function PUT(
           .where(eq(dramas.id, dramaId));
       }
 
-      // Update each episode's shotData and scriptContent
       for (const ep of episodesData) {
         if (!ep.id) continue;
 
         const updates: Record<string, unknown> = {};
-        if (ep.shotData !== undefined) {
-          updates.shotData = ep.shotData;
-        }
-        if (ep.scriptContent !== undefined) {
-          updates.scriptContent = ep.scriptContent;
-        }
-        if (ep.title !== undefined) {
-          updates.title = ep.title;
-        }
-        if (ep.duration !== undefined) {
-          updates.duration = ep.duration;
+        for (const key of Object.keys(ep)) {
+          if (ALLOWED_EPISODE_FIELDS.has(key) && ep[key] !== undefined) {
+            updates[key] = ep[key];
+          }
         }
 
         if (Object.keys(updates).length > 0) {
           await db
             .update(episodes)
-          .set(updates)
+            .set(updates)
             .where(eq(episodes.id, ep.id));
         }
       }
@@ -127,12 +136,22 @@ export async function PUT(
       return NextResponse.json({ drama: updatedDrama[0], episodes: updatedEpisodes });
     }
 
+    // Whitelist allowed fields
+    const updates: Record<string, unknown> = {};
+    for (const key of Object.keys(body)) {
+      if (ALLOWED_DRAMA_FIELDS.has(key)) {
+        updates[key] = body[key];
+      }
+    }
+    updates.updatedAt = new Date();
+
+    if (Object.keys(updates).length <= 1) {
+      return NextResponse.json({ error: "没有可更新的字段" }, { status: 400 });
+    }
+
     const [updated] = await db
       .update(dramas)
-      .set({
-        ...body,
-        updatedAt: new Date(),
-      })
+      .set(updates)
       .where(eq(dramas.id, dramaId))
       .returning();
 

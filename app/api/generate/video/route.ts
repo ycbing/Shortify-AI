@@ -4,10 +4,10 @@ import { db } from "@/lib/db";
 import { episodes } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import {
-  submitVideoGeneration,
-  waitForVideoCompletion,
+  generateVideo,
   downloadVideo,
 } from "@/lib/ai/video-generator";
+import type { Character } from "@/types/drama";
 import {
   uploadFileToCos,
   getSignedCosUrl,
@@ -36,6 +36,7 @@ import {
 } from "@/lib/generation";
 import { tryAcquireUserSlot, releaseUserSlot, getUserActiveCount } from "@/lib/resilience";
 import { createLogger } from "@/lib/logger";
+import { videoSchema } from "@/lib/validation";
 
 const log = createLogger("video-api");
 
@@ -51,12 +52,17 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    dramaId = body.dramaId;
-    const { episodeId } = body;
-
-    if (!dramaId) {
-      return NextResponse.json({ error: "缺少 dramaId" }, { status: 400 });
+    const parsed = videoSchema.safeParse(body);
+    if (!parsed.success) {
+      const firstIssue = parsed.error.issues?.[0];
+      return NextResponse.json(
+        { error: firstIssue?.message || "请求参数无效" },
+        { status: 400 }
+      );
     }
+
+    dramaId = parsed.data.dramaId;
+    const episodeId = parsed.data.episodeId;
 
     const drama = await getOwnedDrama(dramaId, session.user.id);
     if (!drama) {
@@ -146,8 +152,10 @@ export async function POST(request: NextRequest) {
     });
     taskId = taskResult.taskId;
 
+    const characters: Character[] = Array.isArray(drama.characters) ? drama.characters : [];
+
     // Process in background
-    processVideos(dramaId, episodesNeedingVideo, drama.style || "realistic", taskId, session.user.id).catch(
+    processVideos(dramaId, episodesNeedingVideo, drama.style || "realistic", taskId, session.user.id, characters).catch(
       console.error
     ).finally(() => releaseUserSlot(session.user.id));
 
@@ -316,9 +324,14 @@ async function processVideos(
   episodesList: typeof episodes.$inferSelect[],
   style: string,
   taskId: string,
-  userId: string
+  userId: string,
+  characters: Character[] = []
 ) {
   const uploadDir = path.resolve(process.env.UPLOAD_DIR || "./uploads");
+  const charRefMap = new Map<string, string>();
+  for (const c of characters) {
+    if (c.referenceImageUrl) charRefMap.set(c.name, c.referenceImageUrl);
+  }
   const results: {
     episodeNumber: number;
     success: boolean;
@@ -383,7 +396,21 @@ async function processVideos(
         const prompt = shot.subtitle || shot.line || shot.visual || "电影场景";
         console.log(`Episode ${epNum} Shot ${shot.shotNumber}: generating AI video (prompt: ${prompt.substring(0, 50)}...)`);
 
-        // 4. Submit video generation (no fps, no duration - cogvideox-3 doesn't support them)
+        // 4. Build character reference for this shot
+        let shotCharRef: { imageUrl: string; type: "face" | "full_body" } | undefined;
+        if (charRefMap.size > 0) {
+          const shotChar = characters.find((c) =>
+            c.name && (shot.character === c.name || shot.visual?.includes(c.name))
+          );
+          if (shotChar) {
+            const refUrl = charRefMap.get(shotChar.name);
+            if (refUrl) {
+              shotCharRef = { imageUrl: refUrl, type: "face" };
+            }
+          }
+        }
+
+        // 5. Generate video (routes to Kling or CogVideoX automatically)
         await touchGenerationTaskHeartbeat(taskId, {
           currentEpisode: epNum,
           currentShot: shot.shotNumber,
@@ -392,19 +419,9 @@ async function processVideos(
           episodeCount: episodesList.length,
           creditsUsed: totalCreditsUsed,
         });
-        const { taskId: videoTaskId } = await submitVideoGeneration(prompt, signedImageUrl, style);
-        console.log(`Episode ${epNum} Shot ${shot.shotNumber}: video task submitted: ${videoTaskId}`);
-
-        // 5. Wait for completion (max 5 min per shot)
-        await touchGenerationTaskHeartbeat(taskId, {
-          currentEpisode: epNum,
-          currentShot: shot.shotNumber,
-          stage: "waiting",
-          completedCount,
-          episodeCount: episodesList.length,
-          creditsUsed: totalCreditsUsed,
+        const result = await generateVideo(prompt, signedImageUrl, style, {
+          characterReference: shotCharRef,
         });
-        const result = await waitForVideoCompletion(videoTaskId, 300000, 5000);
         await throwIfGenerationTaskCancelled(taskId);
 
         // 6. Download video to local

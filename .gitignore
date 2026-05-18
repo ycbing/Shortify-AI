@@ -44,4 +44,6 @@ yarn-error.log*
 next-env.d.ts
 # uploads (generated files)
 uploads/
+# But keep the API route for serving uploads
+!app/api/uploads/
 - drizzle/

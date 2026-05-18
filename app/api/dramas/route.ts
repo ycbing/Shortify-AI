@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { dramas, episodes } from "@/lib/db/schema";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
+import { createDramaSchema } from "@/lib/validation";
 
 export async function GET(request: NextRequest) {
   try {
@@ -73,8 +74,20 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { title, description, theme, genre, style, episodeCount } = body;
+    const title = body.title || "未命名短剧";
+    const description = body.description || null;
 
+    // Validate creation fields
+    const parsed = createDramaSchema.safeParse(body);
+    if (!parsed.success) {
+      const firstIssue = parsed.error.issues?.[0];
+      return NextResponse.json(
+        { error: firstIssue?.message || "请求参数无效" },
+        { status: 400 }
+      );
+    }
+
+    const { theme, genre, style, episodeCount } = parsed.data;
     const id = uuidv4();
 
     const [drama] = await db
@@ -82,12 +95,12 @@ export async function POST(request: NextRequest) {
       .values({
         id,
         userId: session.user.id,
-        title: title || "未命名短剧",
+        title,
         description,
         theme,
         genre,
         style,
-        episodeCount: episodeCount || 3,
+        episodeCount,
         status: "draft",
       })
       .returning();

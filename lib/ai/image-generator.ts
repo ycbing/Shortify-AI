@@ -1,11 +1,23 @@
 import { getStyleImagePrompt } from "./script-generator";
 import { withRetry } from "@/lib/resilience";
 import { createLogger } from "@/lib/logger";
+import { generateImageWithKling } from "./kling-client";
+import type { KlingCharacterReference } from "./kling-client";
 
 const log = createLogger("image-generator");
 const COGVIEW_BASE_URL =
   process.env.GLM_BASE_URL || "https://open.bigmodel.cn/api/paas/v4";
 const GLM_API_KEY = process.env.GLM_API_KEY || "";
+
+type ImageSize = "1024x1024" | "1280x720" | "1728x960";
+
+export interface GenerateImageOptions {
+  characterReferences?: {
+    imageUrl: string;
+    type: "face" | "full_body";
+    characterName: string;
+  }[];
+}
 
 interface CogViewResponse {
   id: string;
@@ -15,35 +27,28 @@ interface CogViewResponse {
   }[];
 }
 
-export async function generateImage(
+async function generateImageWithCogView(
   prompt: string,
   style: string = "realistic",
-  size: "1024x1024" | "1280x720" | "1728x960" = "1728x960"
+  size: ImageSize = "1728x960"
 ): Promise<string> {
   const stylePrompt = getStyleImagePrompt(style as "realistic" | "anime" | "ink" | "cyberpunk");
   const fullPrompt = `${prompt}。画面风格：${stylePrompt}。宽屏16:9构图，电影感画面，专业摄影级别。`;
 
   const model = process.env.IMAGE_MODEL || "glm-image";
 
-  // glm-image: width/height must be 32-aligned, max 2880px, total pixels < 2^22
-  // cogview-3-flash: supports 1280x720, 1024x1024, etc.
   const imageSize = model.includes("glm-image") ? "1728x960" : size;
 
-  // Content filter (1301) fallback strategy:
-  // Progressive prompt sanitization to bypass content filter
   const attempts: { prompt: string; label: string }[] = [
     { prompt: fullPrompt, label: "full" },
-    // Attempt 2: Simplified description only
     {
       prompt: prompt.substring(0, 80) + `。${stylePrompt}。宽屏16:9构图。`,
       label: "simplified",
     },
-    // Attempt 3: Strip all visual descriptors, keep only style + safe composition
     {
       prompt: `人物场景，${stylePrompt}，电影感画面构图，柔和光线，温馨氛围。`,
       label: "generic-safe",
     },
-    // Attempt 4: Ultra-safe generic landscape/portrait
     {
       prompt: `美丽的城市街道场景，${stylePrompt}，电影感画面，16:9构图。`,
       label: "ultra-safe",
@@ -101,7 +106,6 @@ export async function generateImage(
       const errorText = await response.text();
       lastError = errorText;
 
-      // If content filter (1301), try next prompt variant
       if (response.status === 400 && errorText.includes("1301")) {
         log.warn(`Content filter triggered on ${label} prompt, trying next variant...`, {
           attempt: i + 1,
@@ -110,10 +114,8 @@ export async function generateImage(
         continue;
       }
 
-      // Other errors — don't try more content filter variants
       throw new Error(`CogView API error: ${response.status} - ${errorText}`);
     } catch (err) {
-      // Only continue to next variant for content filter errors
       const isContentFilter = err instanceof Error && (err.message.includes("1301") || err.message.includes("内容审核"));
       if (isContentFilter && i < attempts.length - 1) {
         lastError = err.message;
@@ -125,6 +127,42 @@ export async function generateImage(
   }
 
   throw new Error(`CogView 内容审核拦截，所有去敏尝试均失败: ${lastError.substring(0, 200)}`);
+}
+
+export async function generateImage(
+  prompt: string,
+  style: string = "realistic",
+  size: ImageSize = "1728x960",
+  options?: GenerateImageOptions
+): Promise<string> {
+  const klingConfigured = process.env.KLING_ACCESS_KEY && process.env.KLING_SECRET_KEY;
+  const provider = process.env.IMAGE_PROVIDER || "cogview";
+  const hasRefs = options?.characterReferences && options.characterReferences.length > 0;
+
+  // Auto-use Kling when character references are available (best consistency)
+  if (hasRefs && klingConfigured) {
+    const primaryRef = options!.characterReferences![0];
+    const klingRef: KlingCharacterReference = {
+      imageUrl: primaryRef.imageUrl,
+      type: primaryRef.type,
+    };
+    log.info(`Using Kling with character reference for "${primaryRef.characterName}"`, {
+      provider: "kling",
+      hasReference: true,
+    });
+    return generateImageWithKling(prompt, size, klingRef);
+  }
+
+  // Use Kling for everything if explicitly configured
+  if (provider === "kling" && klingConfigured) {
+    log.info(`Using Kling without character reference`, {
+      provider: "kling",
+      hasReference: false,
+    });
+    return generateImageWithKling(prompt, size);
+  }
+
+  return generateImageWithCogView(prompt, style, size);
 }
 
 export async function downloadImage(
