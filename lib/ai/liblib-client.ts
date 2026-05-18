@@ -163,6 +163,19 @@ async function pollVideoTask(generateUuid: string): Promise<{ videoUrl: string; 
   throw new Error("LibLib video polling timeout");
 }
 
+// ==================== Retry helper ====================
+async function withRetry(fn: () => Promise<Response>, retries = 3, baseDelay = 2000): Promise<Response> {
+  let lastRes: Response;
+  for (let i = 0; i <= retries; i++) {
+    const res = await fn();
+    lastRes = res;
+    if (res.status !== 429 || i === retries) return res;
+    log.warn(`Rate limited (429), retry ${i + 1}/${retries + 1} in ${baseDelay * (i + 1)}ms`);
+    await sleep(baseDelay * (i + 1));
+  }
+  return lastRes!;
+}
+
 // ==================== Star-3 Alpha Text-to-Image ====================
 
 const STAR3_TEMPLATE = "5d7e67009b344550bc1aa6ccbfa1d7f4";
@@ -216,11 +229,11 @@ async function generateWithStar3(options: Star3Options): Promise<string> {
     prompt: options.prompt.substring(0, 80),
   });
 
-  const res = await fetch(url, {
+  const res = await withRetry(() => fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
-  });
+  }));
 
   const result = await res.json();
   if (result.code !== 0 || !result.data?.generateUuid) {
@@ -301,11 +314,11 @@ async function generateWithSD(options: SDOptions): Promise<string> {
     prompt: options.prompt.substring(0, 80),
   });
 
-  const res = await fetch(url, {
+  const res = await withRetry(() => fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
-  });
+  }));
 
   const result = await res.json();
   if (result.code !== 0 || !result.data?.generateUuid) {
@@ -350,7 +363,8 @@ export async function generateVideoWithKling(options: LibLibVideoOptions): Promi
   };
 
   if (options.startFrame) {
-    generateParams.startFrame = options.startFrame;
+    // LibLib kling v2.6 uses 'images' array for image reference
+    generateParams.images = [{ imageUrl: options.startFrame }];
   }
   if (options.endFrame) {
     generateParams.endFrame = options.endFrame;

@@ -495,7 +495,12 @@ async function handleShotStoryboard(
   const shots = episode.shotData as unknown as Shot[];
   const shotImages: { shotNumber: number; imageUrl: string }[] = [];
 
-  for (const shot of shots) {
+  for (let i = 0; i < shots.length; i++) {
+    const shot = shots[i];
+    // Rate-limit: LibLib QPS is 1/sec; wait before each request (skip first)
+    if (i > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+    }
     try {
       const enrichedPrompt = buildAppearancePrompt(shot, characters);
 
