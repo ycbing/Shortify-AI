@@ -1,6 +1,7 @@
 import { getStyleImagePrompt } from "./script-generator";
 import { generateVideoWithKling } from "./kling-client";
 import type { KlingCharacterReference } from "./kling-client";
+import { generateVideoWithKling as generateVideoWithLibLibKling, isLibLibConfigured } from "./liblib-client";
 import path from "path";
 import fs from "fs/promises";
 import { createLogger } from "@/lib/logger";
@@ -68,12 +69,29 @@ export async function generateVideo(
   style?: string,
   options?: GenerateVideoOptions
 ): Promise<{ videoUrl: string; coverUrl?: string }> {
+  // LibLib Kling video (preferred - via LibLib proxy, cheaper)
+  const liblibConfigured = isLibLibConfigured();
   const klingConfigured =
     process.env.KLING_ACCESS_KEY && process.env.KLING_SECRET_KEY;
   const hasCharRef = options?.characterReference?.imageUrl;
 
+  if (liblibConfigured && (hasCharRef || process.env.VIDEO_PROVIDER === "liblib")) {
+    log.info("Using LibLib Kling for video generation");
+    const sizeObj = (options?.size || "1920x1080").split("x");
+    const ar = `${sizeObj[1]}:${sizeObj[0]}`; // height:width
+    const result = await generateVideoWithLibLibKling({
+      prompt,
+      startFrame: imageUrl,
+      aspectRatio: (ar === "1080:1920" ? "9:16" : ar === "1080:1080" ? "1:1" : "16:9") as "16:9" | "9:16" | "1:1",
+      duration: "5",
+      mode: "std",
+    });
+    return { videoUrl: result.videoUrl, coverUrl: result.coverUrl };
+  }
+
+  // Direct Kling API
   if (hasCharRef && klingConfigured) {
-    log.info("Using Kling for video generation with character reference");
+    log.info("Using direct Kling for video generation with character reference");
     return generateVideoWithKling(
       prompt,
       imageUrl,

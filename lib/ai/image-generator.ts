@@ -3,6 +3,8 @@ import { withRetry } from "@/lib/resilience";
 import { createLogger } from "@/lib/logger";
 import { generateImageWithKling } from "./kling-client";
 import type { KlingCharacterReference } from "./kling-client";
+import { generateImageWithLibLib, isLibLibConfigured } from "./liblib-client";
+import type { LibLibCharacterReference } from "./liblib-client";
 
 const log = createLogger("image-generator");
 const COGVIEW_BASE_URL =
@@ -139,7 +141,29 @@ export async function generateImage(
   const provider = process.env.IMAGE_PROVIDER || "cogview";
   const hasRefs = options?.characterReferences && options.characterReferences.length > 0;
 
-  // Auto-use Kling when character references are available (best consistency)
+  // LibLib (preferred when configured - cheaper, more models)
+  const liblibConfigured = isLibLibConfigured();
+  if (liblibConfigured) {
+    if (hasRefs) {
+      const primaryRef = options!.characterReferences![0];
+      const liblibRef: LibLibCharacterReference = {
+        imageUrl: primaryRef.imageUrl,
+        characterName: primaryRef.characterName,
+        type: primaryRef.type,
+      };
+      log.info(`Using LibLib Star-3 with character reference for "${primaryRef.characterName}"`, {
+        provider: "liblib",
+        hasReference: true,
+      });
+      return generateImageWithLibLib(prompt, size, liblibRef);
+    }
+    if (provider === "liblib") {
+      log.info(`Using LibLib without character reference`, { provider: "liblib" });
+      return generateImageWithLibLib(prompt, size);
+    }
+  }
+
+  // Fallback to Kling when character references available
   if (hasRefs && klingConfigured) {
     const primaryRef = options!.characterReferences![0];
     const klingRef: KlingCharacterReference = {
@@ -153,7 +177,7 @@ export async function generateImage(
     return generateImageWithKling(prompt, size, klingRef);
   }
 
-  // Use Kling for everything if explicitly configured
+  // Fallback to Kling for everything if explicitly configured
   if (provider === "kling" && klingConfigured) {
     log.info(`Using Kling without character reference`, {
       provider: "kling",
