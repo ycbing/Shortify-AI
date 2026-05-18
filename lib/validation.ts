@@ -28,9 +28,9 @@ export const registerSchema = z.object({
 
 export const generateScriptSchema = z.object({
   dramaId: z.string().min(1),
-  genre: genreSchema,
-  style: styleSchema,
-  episodeCount: episodeCountSchema,
+  genre: genreSchema.optional(),
+  style: styleSchema.optional(),
+  episodeCount: episodeCountSchema.optional(),
 });
 
 export const storyboardSchema = z.object({
