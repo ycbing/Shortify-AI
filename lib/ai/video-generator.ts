@@ -75,7 +75,7 @@ export async function generateVideo(
     process.env.KLING_ACCESS_KEY && process.env.KLING_SECRET_KEY;
   const hasCharRef = options?.characterReference?.imageUrl;
 
-  if (liblibConfigured && (hasCharRef || process.env.VIDEO_PROVIDER === "liblib")) {
+  if (liblibConfigured && (hasCharRef || (process.env.VIDEO_PROVIDER || "") === "liblib")) {
     log.info("Using LibLib Kling for video generation");
     const sizeObj = (options?.size || "1920x1080").split("x");
     const ar = `${sizeObj[1]}:${sizeObj[0]}`; // height:width
@@ -99,7 +99,7 @@ export async function generateVideo(
     );
   }
 
-  if (process.env.VIDEO_PROVIDER === "kling" && klingConfigured) {
+  if ((process.env.VIDEO_PROVIDER || "") === "kling" && klingConfigured) {
     log.info("Using Kling for video generation");
     return generateVideoWithKling(prompt, imageUrl);
   }

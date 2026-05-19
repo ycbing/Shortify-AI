@@ -216,21 +216,43 @@ async function uploadShotImageAndGetPublicUrl(
   epNum: number,
   shotNumber: number
 ): Promise<string | undefined> {
-  // If COS is configured, upload and get publicly accessible URL
+  const VIDEO_PROVIDER = process.env.VIDEO_PROVIDER || "cogvideo";
+  const isExternalProvider = VIDEO_PROVIDER === "liblib" || VIDEO_PROVIDER === "kling";
+
+  // Upload to COS for storage
   if (isCosConfigured()) {
     try {
       const cosKey = `${dramaId}/images/episode-${epNum}/shot-${shotNumber}.jpg`;
       await uploadToCos(imagePath, cosKey);
-      // Make it temporarily public for external API access (e.g., LibLib)
-      const publicUrl = await getPublicAccessibleUrl(cosKey);
-      return publicUrl;
     } catch (err) {
-      console.warn(`Failed to upload/get public URL for shot image: shot-${shotNumber}`, err);
+      console.warn(`Failed to upload shot image to COS: shot-${shotNumber}`, err);
     }
   }
 
-  // Fallback: return local path (won't work for external APIs)
-  console.warn(`COS not configured or upload failed, shot image may not work: ${imagePath}`);
+  // For CogVideoX: return base64 data URI (no external URL needed)
+  if (!isExternalProvider) {
+    try {
+      const buffer = await fs.readFile(imagePath);
+      const ext = path.extname(imagePath).toLowerCase();
+      const mime = ext === ".png" ? "image/png" : "image/jpeg";
+      return `data:${mime};base64,${buffer.toString("base64")}`;
+    } catch (err) {
+      console.warn(`Failed to read image for base64: shot-${shotNumber}`, err);
+      return undefined;
+    }
+  }
+
+  // For LibLib/Kling: make COS image temporarily public
+  if (isCosConfigured()) {
+    try {
+      const cosKey = `${dramaId}/images/episode-${epNum}/shot-${shotNumber}.jpg`;
+      const publicUrl = await getPublicAccessibleUrl(cosKey);
+      return publicUrl;
+    } catch (err) {
+      console.warn(`Failed to get public URL for shot image: shot-${shotNumber}`, err);
+    }
+  }
+
   return undefined;
 }
 
@@ -435,10 +457,14 @@ async function processVideos(
         await downloadVideo(result.videoUrl, localVideoPath);
         await throwIfGenerationTaskCancelled(taskId);
 
-        // Restore COS ACL to private after video generation
-        restoreCosObjectAcl(imageCosKey).catch((err) => {
-          console.warn(`Failed to restore ACL for ${imageCosKey}:`, err);
-        });
+        // Restore COS ACL (only for LibLib/Kling which use public URLs)
+        const isExtProvider = (process.env.VIDEO_PROVIDER || "cogvideo") === "liblib" || (process.env.VIDEO_PROVIDER || "cogvideo") === "kling";
+        if (isExtProvider) {
+          restoreCosObjectAcl(imageCosKey).catch((err) => {
+            console.warn(`Failed to restore ACL for ${imageCosKey}:`, err);
+          });
+          await new Promise((r) => setTimeout(r, 5000));
+        }
 
         // 7. Mix voiceover audio into the AI video immediately (one encode pass)
         const voiceoverPath = path.join(uploadDir, "voiceovers", dramaId, `episode-${epNum}`, `shot-${shot.shotNumber}.mp3`);
