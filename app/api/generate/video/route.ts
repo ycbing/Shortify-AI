@@ -15,6 +15,8 @@ import {
   uploadToCos,
   aiVideoCosKey,
   videoCosKey,
+  getPublicAccessibleUrl,
+  restoreCosObjectAcl,
 } from "@/lib/ai/cos-storage";
 import type { Shot } from "@/types/drama";
 import path from "path";
@@ -208,24 +210,26 @@ async function findShotImage(
 /**
  * Upload a shot image to COS and return a signed URL.
  */
-async function uploadShotImageAndGetSignedUrl(
+async function uploadShotImageAndGetPublicUrl(
   imagePath: string,
   dramaId: string,
   epNum: number,
   shotNumber: number
 ): Promise<string | undefined> {
-  // If COS is configured, upload and get signed URL
+  // If COS is configured, upload and get publicly accessible URL
   if (isCosConfigured()) {
     try {
       const cosKey = `${dramaId}/images/episode-${epNum}/shot-${shotNumber}.jpg`;
       await uploadToCos(imagePath, cosKey);
-      return getSignedCosUrl(cosKey, 3600);
+      // Make it temporarily public for external API access (e.g., LibLib)
+      const publicUrl = await getPublicAccessibleUrl(cosKey);
+      return publicUrl;
     } catch (err) {
-      console.warn(`Failed to upload shot image to COS: shot-${shotNumber}`, err);
+      console.warn(`Failed to upload/get public URL for shot image: shot-${shotNumber}`, err);
     }
   }
 
-  // Fallback: return local path (won't work for CogVideoX API, but logged)
+  // Fallback: return local path (won't work for external APIs)
   console.warn(`COS not configured or upload failed, shot image may not work: ${imagePath}`);
   return undefined;
 }
@@ -385,10 +389,10 @@ async function processVideos(
           continue;
         }
 
-        // 2. Upload image to COS and get signed URL
-        const signedImageUrl = await uploadShotImageAndGetSignedUrl(shotImagePath, dramaId, epNum, shot.shotNumber);
-        if (!signedImageUrl) {
-          console.warn(`Episode ${epNum} Shot ${shot.shotNumber}: could not get signed image URL, skipping`);
+        // 2. Upload image to COS and get publicly accessible URL
+        const publicImageUrl = await uploadShotImageAndGetPublicUrl(shotImagePath, dramaId, epNum, shot.shotNumber);
+        if (!publicImageUrl) {
+          console.warn(`Episode ${epNum} Shot ${shot.shotNumber}: could not get public image URL, skipping`);
           continue;
         }
 
@@ -411,6 +415,7 @@ async function processVideos(
         }
 
         // 5. Generate video (routes to Kling or CogVideoX automatically)
+        const imageCosKey = `${dramaId}/images/episode-${epNum}/shot-${shot.shotNumber}.jpg`;
         await touchGenerationTaskHeartbeat(taskId, {
           currentEpisode: epNum,
           currentShot: shot.shotNumber,
@@ -419,7 +424,7 @@ async function processVideos(
           episodeCount: episodesList.length,
           creditsUsed: totalCreditsUsed,
         });
-        const result = await generateVideo(prompt, signedImageUrl, style, {
+        const result = await generateVideo(prompt, publicImageUrl, style, {
           characterReference: shotCharRef,
         });
         await throwIfGenerationTaskCancelled(taskId);
@@ -429,6 +434,11 @@ async function processVideos(
         const localVideoPath = path.join(localVideoDir, `shot-${shot.shotNumber}.mp4`);
         await downloadVideo(result.videoUrl, localVideoPath);
         await throwIfGenerationTaskCancelled(taskId);
+
+        // Restore COS ACL to private after video generation
+        restoreCosObjectAcl(imageCosKey).catch((err) => {
+          console.warn(`Failed to restore ACL for ${imageCosKey}:`, err);
+        });
 
         // 7. Mix voiceover audio into the AI video immediately (one encode pass)
         const voiceoverPath = path.join(uploadDir, "voiceovers", dramaId, `episode-${epNum}`, `shot-${shot.shotNumber}.mp3`);

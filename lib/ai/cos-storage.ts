@@ -153,6 +153,60 @@ export async function deleteFromCos(cosKey: string): Promise<void> {
 }
 
 /**
+ * Make a COS object temporarily public-readable, then return its public URL.
+ * Use this when an external service (e.g., LibLib API) needs to access the file.
+ * The ACL is set to public-read; caller should call restoreCosObjectAcl after use.
+ */
+export async function makeCosObjectPublic(cosKey: string): Promise<string> {
+  const client = getCosClient();
+  if (!client) return getCosUrl(cosKey);
+
+  return new Promise((resolve, reject) => {
+    client.putObjectAcl(
+      {
+        Bucket: BUCKET(),
+        Region: REGION(),
+        Key: cosKey,
+        ACL: 'public-read',
+      },
+      (err, _data) => {
+        if (err) {
+          console.error(`Failed to set public-read ACL for ${cosKey}:`, err.message);
+          reject(err);
+        } else {
+          resolve(getCosUrl(cosKey));
+        }
+      }
+    );
+  });
+}
+
+/**
+ * Restore a COS object's ACL to private (after external service is done).
+ */
+export async function restoreCosObjectAcl(cosKey: string): Promise<void> {
+  const client = getCosClient();
+  if (!client) return;
+
+  return new Promise((resolve) => {
+    client.putObjectAcl(
+      {
+        Bucket: BUCKET(),
+        Region: REGION(),
+        Key: cosKey,
+        ACL: 'private',
+      },
+      (err) => {
+        if (err) {
+          console.warn(`Failed to restore private ACL for ${cosKey}:`, err.message);
+        }
+        resolve();
+      }
+    );
+  });
+}
+
+/**
  * Upload a file to COS. If COS is not configured, return the local path as-is.
  * This is the main function to call from other modules.
  */
@@ -179,6 +233,18 @@ export async function uploadFileToCos(
     );
     return localPath;
   }
+}
+
+/**
+ * Get a publicly accessible URL for a COS object for external services.
+ * Temporarily sets the object to public-read ACL.
+ * Returns a plain COS URL (no signature) that external services can fetch.
+ */
+export async function getPublicAccessibleUrl(cosKey: string): Promise<string> {
+  if (!isCosConfigured()) {
+    return getCosUrl(cosKey);
+  }
+  return makeCosObjectPublic(cosKey);
 }
 
 /**

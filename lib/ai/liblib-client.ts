@@ -363,8 +363,11 @@ export async function generateVideoWithKling(options: LibLibVideoOptions): Promi
   };
 
   if (options.startFrame) {
-    // LibLib kling v2.6 uses 'images' array for image reference
-    generateParams.images = [{ imageUrl: options.startFrame }];
+    // LibLib kling v2.6 uses 'images' string array for image reference (not object array)
+    // The URL must be publicly accessible (no signature required)
+    generateParams.images = [options.startFrame];
+    // kling-v2.6 requires pro mode for img2video
+    generateParams.mode = options.mode || "pro";
   }
   if (options.endFrame) {
     generateParams.endFrame = options.endFrame;
@@ -374,11 +377,17 @@ export async function generateVideoWithKling(options: LibLibVideoOptions): Promi
   const url = buildUrl(uri);
   const body = { templateUuid, generateParams };
 
+  // For img2video, default to pro mode (kling-v2.6 requires it)
+  if (isImage2Video && generateParams.mode !== "pro") {
+    generateParams.mode = "pro";
+  }
+
   log.info("Submitting Kling video task via LibLib", {
     model: generateParams.model,
     type: isImage2Video ? "img2video" : "text2video",
     hasStartFrame: !!options.startFrame,
     duration: options.duration || "5",
+    mode: generateParams.mode,
   });
 
   const res = await fetch(url, {
