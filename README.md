@@ -30,6 +30,8 @@ AI 驱动的短剧创作平台，从创意到成片一键搞定。
 | AI 配音 | 讯飞 TTS (WebSocket) + Edge-TTS 降级 |
 | 视频合成 | FFmpeg (Ken Burns 运镜 + concat + 字幕烧录) |
 | 云存储 | 腾讯云 COS (私有桶 + 签名 URL) |
+| AI 角色一致 | 可灵 Kling (图像/视频 character_reference) |
+| 邮件服务 | 内置 SMTP 客户端 (零依赖) |
 
 ## 🚀 快速开始
 
@@ -142,6 +144,10 @@ scripts/
 ├── regenerate-kenburns.ts           # 运镜参数重新生成
 └── test-cogvideo.ts                 # CogVideoX 测试
 ```
+
+## 🌐 友情链接
+
+- [Linux DO](https://linux.do/) — 高质量技术社区
 
 ## 📄 License
 
