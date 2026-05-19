@@ -154,7 +154,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "短剧不存在" }, { status: 404 });
     }
 
-    const uploadDir = process.env.UPLOAD_DIR || "./uploads";
+    const uploadDir = path.resolve(process.env.UPLOAD_DIR || "./uploads");
 
     if (episodeId) {
       // Check credits for single episode

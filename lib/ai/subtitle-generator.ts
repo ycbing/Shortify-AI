@@ -248,13 +248,12 @@ interface SubtitleLine {
  * Rule: max ~15 chars per subtitle, max ~4 seconds per subtitle.
  */
 function splitSubtitleText(text: string, durationMs: number): SubtitleLine[] {
-  const maxCharsPerLine = 20; // max characters per subtitle line
-  const maxMsPerLine = 5000;  // max duration per subtitle line
-  const minMsPerLine = 1500;  // minimum duration per subtitle line
+  const maxCharsPerLine = 20;
+  const maxMsPerLine = 5000;
+  const minMsPerLine = 1500;
 
-  // Clean up stage directions like （自言自语）, （微笑）
   const cleaned = text.replace(/（[^）]+）/g, "").trim();
-  
+
   if (cleaned.length <= maxCharsPerLine && durationMs <= maxMsPerLine) {
     return [{ start: formatSrtTime(0), end: formatSrtTime(durationMs), text: cleaned }];
   }
@@ -264,12 +263,11 @@ function splitSubtitleText(text: string, durationMs: number): SubtitleLine[] {
   let pos = 0;
   let timePos = 0;
 
-  while (pos < chars.length) {
+  while (pos < chars.length && timePos < durationMs - 200) {
     const remaining = chars.length - pos;
     const remainingTime = durationMs - timePos;
 
-    if (remaining <= maxCharsPerLine) {
-      // Last segment: use remaining time
+    if (remaining <= maxCharsPerLine || remainingTime <= maxMsPerLine) {
       lines.push({
         start: formatSrtTime(timePos),
         end: formatSrtTime(durationMs),
@@ -278,41 +276,37 @@ function splitSubtitleText(text: string, durationMs: number): SubtitleLine[] {
       break;
     }
 
-    // Determine how many chars fit in this line
-    const timeForThisLine = Math.min(maxMsPerLine, remainingTime * 0.6);
-    const charsForThisLine = Math.min(
-      maxCharsPerLine,
-      Math.max(4, Math.floor(chars.length * (timeForThisLine / durationMs)))
-    );
+    // At most half the remaining chars, at most maxCharsPerLine
+    const charsForThisLine = Math.min(maxCharsPerLine, Math.ceil(remaining / 2));
 
-    // Try to break at punctuation or natural pause
+    // Break at punctuation when possible
     let breakPos = pos + charsForThisLine;
-    const searchWindow = chars.slice(pos, pos + charsForThisLine + 5);
-    for (let i = searchWindow.length - 1; i >= Math.max(0, searchWindow.length - 8); i--) {
-      const ch = searchWindow[i];
-      if ("，。！？、；：".includes(ch)) {
-        breakPos = pos + i + 1;
+    const searchEnd = Math.min(pos + charsForThisLine + 5, chars.length);
+    for (let i = searchEnd - 1; i >= pos + Math.max(4, charsForThisLine - 8); i--) {
+      if ("，。！？、；：".includes(chars[i])) {
+        breakPos = i + 1;
         break;
       }
     }
 
-    const lineText = chars.slice(pos, breakPos).join("");
-    const lineDuration = Math.max(
-      minMsPerLine,
-      Math.min(maxMsPerLine, Math.round(durationMs * (breakPos - pos) / chars.length))
+    const segChars = breakPos - pos;
+    const lineDuration = Math.round(
+      Math.min(maxMsPerLine, Math.max(minMsPerLine, durationMs * segChars / chars.length))
     );
+
+    const endMs = Math.min(timePos + lineDuration, durationMs);
 
     lines.push({
       start: formatSrtTime(timePos),
-      end: formatSrtTime(timePos + lineDuration),
-      text: lineText,
+      end: formatSrtTime(endMs),
+      text: chars.slice(pos, breakPos).join(""),
     });
 
-    timePos += lineDuration;
+    timePos = endMs;
     pos = breakPos;
   }
 
-  // Adjust last line end time
+  // Ensure last line reaches exact duration
   if (lines.length > 0) {
     lines[lines.length - 1].end = formatSrtTime(durationMs);
   }

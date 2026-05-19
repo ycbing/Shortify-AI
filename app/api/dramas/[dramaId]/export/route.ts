@@ -52,7 +52,7 @@ export async function POST(
 
       // Second: try local complete.mp4
       if (!downloadUrl) {
-        const uploadDir = process.env.UPLOAD_DIR || "./uploads";
+        const uploadDir = path.resolve(process.env.UPLOAD_DIR || "./uploads");
         const completeLocalPath = path.join(uploadDir, "videos", dramaId, "complete.mp4");
         try {
           await fs.access(completeLocalPath);
