@@ -403,7 +403,13 @@ async function processVoiceoverGeneration({
         if (err instanceof GenerationTaskCancelledError) {
           throw err;
         }
-        console.error(`Failed to generate voiceover for episode ${episode.episodeNumber}:`, err);
+        log.error(`Failed to generate voiceover for episode ${episode.episodeNumber}`, { error: err instanceof Error ? err.message : String(err) });
+        // Push failure entry so completedCount reflects total processed
+        results.push({
+          episodeNumber: episode.episodeNumber,
+          voiceoverUrl: "",
+          duration: 0,
+        });
       }
 
       await updateGenerationTaskProgress(taskId, {
@@ -447,7 +453,14 @@ async function processVoiceoverGeneration({
       const videoPaths: string[] = [];
       let composedCount = 0;
 
-      for (const episode of allEpisodes) {
+      // Re-query episodes from DB to get fresh voiceoverUrls
+      const freshEpisodes = await db
+        .select()
+        .from(episodes)
+        .where(eq(episodes.dramaId, dramaId))
+        .orderBy(episodes.episodeNumber);
+
+      for (const episode of freshEpisodes) {
         await throwIfGenerationTaskCancelled(taskId);
 
         if (!episode.voiceoverUrl) {
@@ -600,13 +613,16 @@ async function processVoiceoverGeneration({
         mergedUrl = toDbPath(await uploadFileToCos(localMergedPath, mergedCosKey));
       }
 
-      // Update drama total duration and status
+      // Update drama total duration, merged video URL, and status
       const totalDuration = allEpisodes.reduce(
         (sum, ep) => sum + (ep.duration || 0), 0
       );
       await db
         .update(dramas)
-        .set({ totalDuration })
+        .set({
+          totalDuration,
+          ...(mergedUrl ? { mergedVideoUrl: mergedUrl } : {}),
+        })
         .where(eq(dramas.id, dramaId));
       await updateDramaStatus(dramaId, "completed");
 

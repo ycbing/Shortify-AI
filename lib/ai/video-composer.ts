@@ -235,12 +235,13 @@ export async function composeEpisodeFromShots(
     shotVideos?: Map<number, string>; // shotNumber -> video path
     bgmPath?: string | null; // BGM file path to mix into final video
     bgmVolume?: number; // BGM volume (0-1), default 0.15
+    outputPath?: string; // explicit output path; computed from UPLOAD_DIR if omitted
   }
 ): Promise<string> {
   const uploadDir = path.resolve(process.env.UPLOAD_DIR || "./uploads");
   const episodeDir = path.join(uploadDir, "videos", dramaId);
   const tempDir = path.join(episodeDir, `episode-${episodeNumber}-temp`);
-  const outputPath = path.join(episodeDir, `episode-${episodeNumber}.mp4`);
+  const outputPath = options?.outputPath || path.join(episodeDir, `episode-${episodeNumber}.mp4`);
 
   await fs.mkdir(tempDir, { recursive: true });
   await fs.mkdir(episodeDir, { recursive: true });
@@ -315,8 +316,19 @@ export async function composeEpisodeFromShots(
   // Mix BGM into the final video
   if (options?.bgmPath) {
     const bgmVol = options.bgmVolume ?? 0.15;
+
+    // Probe actual video duration for proper fade-out timing
+    let videoDuration = 60;
+    try {
+      const { stdout } = await execAsync(
+        `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${finalOutputPath}"`
+      );
+      videoDuration = Math.max(0, parseFloat(stdout.trim()) || 60);
+    } catch { /* use default */ }
+    const fadeOutStart = Math.max(0, videoDuration - 2);
+
     const bgmMixedPath = path.join(episodeDir, `episode-${episodeNumber}-bgm.mp4`);
-    const cmd = `ffmpeg -i "${finalOutputPath}" -i "${options.bgmPath}" -filter_complex "[1:a]volume=${bgmVol},afade=t=in:st=0:d=1,afade=t=out:st=60:d=2[bgm];[0:a][bgm]amix=inputs=2:duration=first:dropout_transition=2[aout]" -map 0:v -map "[aout]" -c:v copy -c:a aac -movflags +faststart -y "${bgmMixedPath}"`;
+    const cmd = `ffmpeg -i "${finalOutputPath}" -i "${options.bgmPath}" -filter_complex "[1:a]volume=${bgmVol},afade=t=in:st=0:d=1,afade=t=out:st=${fadeOutStart}:d=2[bgm];[0:a][bgm]amix=inputs=2:duration=first:dropout_transition=2[aout]" -map 0:v -map "[aout]" -c:v copy -c:a aac -movflags +faststart -y "${bgmMixedPath}"`;
     await execAsync(cmd, { timeout: 300000 }).catch(async (err) => {
       console.warn("BGM mixing failed, using video without BGM:", err);
       return;

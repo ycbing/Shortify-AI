@@ -8,11 +8,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Film, Loader2 } from "lucide-react";
+import { CheckCircle, AlertCircle, Film, Loader2 } from "lucide-react";
 
 export default function SignInContent() {
   const searchParams = useSearchParams();
   const callbackUrl = searchParams.get("callbackUrl") || "/dashboard";
+  const verified = searchParams.get("verified");
+  const errorParam = searchParams.get("error");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -49,6 +51,18 @@ export default function SignInContent() {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
+            {verified === "1" && (
+              <div className="flex items-center gap-2 text-sm text-emerald-400 bg-emerald-500/10 rounded p-2">
+                <CheckCircle className="h-4 w-4 shrink-0" />
+                邮箱已验证，请登录
+              </div>
+            )}
+            {errorParam === "invalid_token" && (
+              <div className="flex items-center gap-2 text-sm text-amber-400 bg-amber-500/10 rounded p-2">
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                验证链接已过期，请重新注册
+              </div>
+            )}
             {error && (
               <div className="text-sm text-red-400 bg-red-500/10 rounded p-2">{error}</div>
             )}
@@ -65,7 +79,12 @@ export default function SignInContent() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">密码</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="password">密码</Label>
+                <Link href="/forgot-password" className="text-xs text-muted-foreground hover:text-emerald-400 transition">
+                  忘记密码？
+                </Link>
+              </div>
               <Input
                 id="password"
                 type="password"

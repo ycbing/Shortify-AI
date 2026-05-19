@@ -11,7 +11,10 @@ export async function middleware(request: NextRequest) {
     pathname === "/" ||
     pathname.startsWith("/api") ||
     pathname.startsWith("/view/") ||
-    pathname === "/gallery";
+    pathname === "/gallery" ||
+    pathname === "/forgot-password" ||
+    pathname === "/reset-password" ||
+    pathname === "/verify-email";
 
   if (isPublicRoute) {
     return NextResponse.next();

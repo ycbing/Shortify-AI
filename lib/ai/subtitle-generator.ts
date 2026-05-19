@@ -198,13 +198,13 @@ export async function generateSubtitlesWithASR(
         diff,
       });
     } else {
-      matched++;
+      // ASR unavailable — don't count as matched (quality check not performed)
       qualityDetails.push({
         shotNumber: shot.shotNumber,
         originalText,
-        asrText: asrText || "(无法识别)",
-        match: true,
-        diff: "",
+        asrText: "(ASR未执行)",
+        match: false,
+        diff: "ASR未执行，跳过质量检查",
       });
     }
 

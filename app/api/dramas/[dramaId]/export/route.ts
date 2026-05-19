@@ -40,28 +40,33 @@ export async function POST(
     }
 
     if (format === "full") {
-      // Try to find complete.mp4
-      const uploadDir = process.env.UPLOAD_DIR || "./uploads";
-      const completeLocalPath = path.join(uploadDir, "videos", dramaId, "complete.mp4");
       let downloadUrl: string | null = null;
 
-      // Check if complete.mp4 exists locally
-      try {
-        await fs.access(completeLocalPath);
-        // Convert to public URL or COS signed URL
-        const publicPath = `/api/uploads/videos/${dramaId}/complete.mp4`;
-        downloadUrl = `${publicPath}?download=${encodeURIComponent(drama.title || "完整视频")}.mp4`;
-      } catch {
-        // complete.mp4 not found, check if first episode has a COS URL for merged video
+      // First priority: use mergedVideoUrl from drama record
+      if (drama.mergedVideoUrl) {
+        downloadUrl = getDownloadUrl(
+          drama.mergedVideoUrl,
+          `${drama.title || "完整视频"}.mp4`
+        );
       }
 
-      // Also check if any episode has a "complete" COS URL
+      // Second: try local complete.mp4
+      if (!downloadUrl) {
+        const uploadDir = process.env.UPLOAD_DIR || "./uploads";
+        const completeLocalPath = path.join(uploadDir, "videos", dramaId, "complete.mp4");
+        try {
+          await fs.access(completeLocalPath);
+          downloadUrl = `/api/uploads/videos/${dramaId}/complete.mp4?download=${encodeURIComponent(drama.title || "完整视频")}.mp4`;
+        } catch { /* not found */ }
+      }
+
+      // Third: try COS
       if (!downloadUrl) {
         const cosCompleteKey = `${dramaId}/videos/complete.mp4`;
         downloadUrl = getSignedCosUrl(cosCompleteKey, 7200);
       }
 
-      // Fallback: return first episode video as individual download
+      // Fallback: return first episode
       if (!downloadUrl && videoEpisodes[0]?.videoUrl) {
         downloadUrl = getDownloadUrl(videoEpisodes[0].videoUrl, `${drama.title}-第1集.mp4`);
       }

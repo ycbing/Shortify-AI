@@ -19,6 +19,7 @@ export const users = pgTable("users", {
   email: text("email").notNull(),
   name: text("name"),
   credits: integer("credits").default(INITIAL_USER_CREDITS),
+  emailVerified: timestamp("email_verified", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -54,6 +55,7 @@ export const dramas = pgTable(
     totalDuration: integer("total_duration"),
     coverUrl: text("cover_url"),
     bgmUrl: text("bgm_url"), // user-uploaded background music file
+    mergedVideoUrl: text("merged_video_url"), // full-drama merged video
     shareCount: integer("share_count").default(0), // share click counter
     characters: jsonb("characters"), // v2: character list with voiceId
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -127,6 +129,23 @@ export const generationTasks = pgTable(
     completedAt: timestamp("completed_at", { withTimezone: true }),
   },
   (table) => [index("generation_tasks_drama_id_idx").on(table.dramaId)]
+);
+
+// Verification tokens (email verification + password reset)
+export const verificationTokens = pgTable(
+  "verification_tokens",
+  {
+    id: text("id").primaryKey(),
+    email: text("email").notNull(),
+    token: text("token").notNull().unique(),
+    type: text("type").notNull(), // verify_email | reset_password
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("verification_tokens_token_idx").on(table.token),
+    index("verification_tokens_email_idx").on(table.email),
+  ]
 );
 
 // Types
