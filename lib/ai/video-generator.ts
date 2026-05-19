@@ -75,8 +75,10 @@ export async function generateVideo(
     process.env.KLING_ACCESS_KEY && process.env.KLING_SECRET_KEY;
   const hasCharRef = options?.characterReference?.imageUrl;
 
-  if (liblibConfigured && (hasCharRef || (process.env.VIDEO_PROVIDER || "") === "liblib")) {
-    log.info("Using LibLib Kling for video generation");
+  const videoProvider = process.env.VIDEO_PROVIDER || "cogvideo";
+  log.info("Video generation provider", { provider: videoProvider });
+
+  if (liblibConfigured && videoProvider === "liblib") {
     const sizeObj = (options?.size || "1920x1080").split("x");
     const ar = `${sizeObj[1]}:${sizeObj[0]}`; // height:width
     const result = await generateVideoWithLibLibKling({
