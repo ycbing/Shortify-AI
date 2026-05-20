@@ -1,0 +1,9 @@
+node_modules
+.next
+.git
+.gitignore
+.env*.local
+uploads
+drizzle
+*.md
+.github

@@ -14,6 +14,9 @@ import fs from "fs/promises";
 import { checkCredits, CREDIT_COSTS, requireCreditDeduction } from "@/lib/credits";
 import { getOwnedDrama } from "@/lib/dramas";
 import { updateDramaStatus } from "@/lib/drama-status";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("compose-api");
 import {
   createOrReuseGenerationTask,
   getActiveGenerationTask,
@@ -272,7 +275,7 @@ export async function POST(request: NextRequest) {
       dramaBgmUrl: drama.bgmUrl,
       dramaGenre: drama.genre,
       allEpisodes,
-    }).catch(console.error);
+    }).catch(err => log.error("Background compose generation failed", { error: err instanceof Error ? err.message : String(err) }));
 
     return NextResponse.json({
       taskId,
@@ -280,7 +283,7 @@ export async function POST(request: NextRequest) {
       episodeCount: allEpisodes.length,
     });
   } catch (error) {
-    console.error("Video composition failed:", error);
+    log.error("Video composition failed", { error: error instanceof Error ? error.message : String(error) });
     if (taskId && dramaId) {
       await failGenerationTask(
         taskId,
@@ -471,7 +474,7 @@ async function processComposeGeneration({
         if (err instanceof GenerationTaskCancelledError) {
           throw err;
         }
-        console.error(`Failed to compose episode ${episode.episodeNumber}:`, err);
+        log.error(`Failed to compose episode ${episode.episodeNumber}`, { error: err instanceof Error ? err.message : String(err) });
       }
 
       await updateGenerationTaskProgress(taskId, {

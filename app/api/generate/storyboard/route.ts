@@ -279,7 +279,7 @@ export async function POST(request: NextRequest) {
       characters: Array.isArray(drama.characters) ? drama.characters : [],
       uploadDir,
       allEpisodes,
-    }).catch(console.error).finally(() => releaseUserSlot(session.user.id));
+    }).catch(err => log.error("Background storyboard processing failed", { error: err instanceof Error ? err.message : String(err) })).finally(() => releaseUserSlot(session.user.id));
 
     return NextResponse.json({
       taskId,
@@ -287,7 +287,7 @@ export async function POST(request: NextRequest) {
       episodeCount: allEpisodes.length,
     });
   } catch (error) {
-    console.error("Storyboard generation failed:", error);
+    log.error("Storyboard generation failed", { error: error instanceof Error ? error.message : String(error) });
     if (taskId && dramaId) {
       await failGenerationTask(
         taskId,
@@ -470,7 +470,7 @@ async function processStoryboardGeneration({
     // Refund credits if nothing was generated
     if (creditsUsed > 0 && !results.some((r) => r.imageUrl || r.shotImages?.some((s) => s.imageUrl))) {
       log.warn(`No storyboard generated, refunding ${creditsUsed} credits`, { dramaId, taskId });
-      await refundCredits(userId, creditsUsed, dramaId, "分镜生成失败 - 积分退还").catch(console.error);
+      await refundCredits(userId, creditsUsed, dramaId, "分镜生成失败 - 积分退还").catch(err => log.error("Failed to refund credits", { error: err instanceof Error ? err.message : String(err) }));
     }
 
     await failGenerationTask(
@@ -542,7 +542,7 @@ async function handleShotStoryboard(
         shotImages.push({ shotNumber: shot.shotNumber, imageUrl });
       }
     } catch (err) {
-      console.error(`Failed to generate image for shot ${shot.shotNumber}:`, err);
+      log.error("Failed to generate image for shot", { shotNumber: shot.shotNumber, error: err instanceof Error ? err.message : String(err) });
       shotImages.push({ shotNumber: shot.shotNumber, imageUrl: "" });
     }
   }

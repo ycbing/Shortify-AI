@@ -1,0 +1,40 @@
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=postgresql://shortify:shortify123@db:5432/shortify_ai
+      - NEXTAUTH_SECRET=change-me-in-production
+      - NEXTAUTH_URL=http://localhost:3000
+      - UPLOAD_DIR=/app/uploads
+      - GLM_API_KEY=${GLM_API_KEY:-}
+      - GLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4
+      - IMAGE_MODEL=${IMAGE_MODEL:-cogview-3-plus}
+      - VIDEO_MODEL=${VIDEO_MODEL:-cogvideox-3}
+      # Optional: COS, Xunfei TTS, Kling, SMTP
+    volumes:
+      - uploads:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: shortify
+      POSTGRES_PASSWORD: shortify123
+      POSTGRES_DB: shortify_ai
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shortify"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  uploads:
+  pgdata:

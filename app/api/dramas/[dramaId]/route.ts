@@ -5,6 +5,9 @@ import { dramas, episodes } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { getOwnedDrama } from "@/lib/dramas";
 import { PUBLIC_DRAMA_STATUSES } from "@/lib/public-dramas";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("dramas-api");
 
 const ALLOWED_DRAMA_FIELDS = new Set([
   "title", "description", "theme", "genre", "style",
@@ -57,7 +60,7 @@ export async function GET(
 
     return NextResponse.json({ drama, episodes: dramaEpisodes });
   } catch (error) {
-    console.error("Failed to fetch drama:", error);
+    log.error("Failed to fetch drama", { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json({ error: "获取短剧详情失败" }, { status: 500 });
   }
 }
@@ -157,7 +160,7 @@ export async function PUT(
 
     return NextResponse.json({ drama: updated });
   } catch (error) {
-    console.error("Failed to update drama:", error);
+    log.error("Failed to update drama", { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json({ error: "更新短剧失败" }, { status: 500 });
   }
 }
@@ -185,7 +188,7 @@ export async function DELETE(
 
     return NextResponse.json({ message: "删除成功" });
   } catch (error) {
-    console.error("Failed to delete drama:", error);
+    log.error("Failed to delete drama", { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json({ error: "删除短剧失败" }, { status: 500 });
   }
 }

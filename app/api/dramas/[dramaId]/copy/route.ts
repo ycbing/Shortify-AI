@@ -5,6 +5,9 @@ import { dramas, episodes } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import { getOwnedDrama } from "@/lib/dramas";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("dramas-api");
 
 export async function POST(
   request: NextRequest,
@@ -81,7 +84,7 @@ export async function POST(
       },
     });
   } catch (error) {
-    console.error("Failed to copy drama:", error);
+    log.error("Failed to copy drama", { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json({ error: "复制短剧失败" }, { status: 500 });
   }
 }

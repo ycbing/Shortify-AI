@@ -5,6 +5,9 @@ import { userPasswords } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { verifyToken, deleteTokensForEmail } from "@/lib/tokens";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("auth-api");
 
 const resetSchema = z.object({
   token: z.string().min(1),
@@ -38,7 +41,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ message: "密码已重置，请重新登录" });
   } catch (error) {
-    console.error("Reset password failed:", error);
+    log.error("Reset password failed", { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json({ error: "重置失败，请稍后重试" }, { status: 500 });
   }
 }

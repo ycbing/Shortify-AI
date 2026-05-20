@@ -5,6 +5,9 @@
 import { db } from "@/lib/db";
 import { dramas, episodes } from "@/lib/db/schema";
 import { eq, desc, sql, like, and } from "drizzle-orm";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("public-dramas");
 
 /** Drama statuses that are considered publicly visible */
 export const PUBLIC_DRAMA_STATUSES = new Set(["completed", "storyboard_ready", "voiceover_ready"]);

@@ -158,7 +158,7 @@ export async function POST(request: NextRequest) {
 
     // Process in background
     processVideos(dramaId, episodesNeedingVideo, drama.style || "realistic", taskId, session.user.id, characters).catch(
-      console.error
+      err => log.error("Background video processing failed", { error: err instanceof Error ? err.message : String(err) })
     ).finally(() => releaseUserSlot(session.user.id));
 
     return NextResponse.json({
@@ -168,7 +168,7 @@ export async function POST(request: NextRequest) {
       shotCount: totalShotsNeeded,
     });
   } catch (error) {
-    console.error("Video generation failed:", error);
+    log.error("Video generation failed", { error: error instanceof Error ? error.message : String(error) });
     if (taskId && dramaId) {
       await failGenerationTask(
         taskId,
@@ -225,7 +225,7 @@ async function uploadShotImageAndGetPublicUrl(
       const cosKey = `${dramaId}/images/episode-${epNum}/shot-${shotNumber}.jpg`;
       await uploadToCos(imagePath, cosKey);
     } catch (err) {
-      console.warn(`Failed to upload shot image to COS: shot-${shotNumber}`, err);
+      log.warn("Failed to upload shot image to COS", { shotNumber });
     }
   }
 
@@ -237,7 +237,7 @@ async function uploadShotImageAndGetPublicUrl(
       const mime = ext === ".png" ? "image/png" : "image/jpeg";
       return `data:${mime};base64,${buffer.toString("base64")}`;
     } catch (err) {
-      console.warn(`Failed to read image for base64: shot-${shotNumber}`, err);
+      log.warn("Failed to read image for base64", { shotNumber });
       return undefined;
     }
   }
@@ -249,7 +249,7 @@ async function uploadShotImageAndGetPublicUrl(
       const publicUrl = await getPublicAccessibleUrl(cosKey);
       return publicUrl;
     } catch (err) {
-      console.warn(`Failed to get public URL for shot image: shot-${shotNumber}`, err);
+      log.warn("Failed to get public URL for shot image", { shotNumber });
     }
   }
 
@@ -274,7 +274,7 @@ async function mixAudioToShotVideo(
     );
     audioDuration = parseFloat(stdout.trim()) || 5;
   } catch {
-    // use default
+    // ffprobe duration detection failed, using default
   }
 
   const fadeDuration = Math.min(0.3, audioDuration * 0.1);
@@ -308,14 +308,14 @@ async function concatMixedVideos(
   const rawOutputPath = path.join(outputDir, `episode-${epNum}-raw.mp4`);
   try {
     execSync(
-      `ffmpeg -y -f concat -safe 0 -i "${listFile}" -c copy -movflags +faststart "${rawOutputPath}"`,
+      `ffmpeg -y -f concat -safe 1 -i "${listFile}" -c copy -movflags +faststart "${rawOutputPath}"`,
       { timeout: 120000 }
     );
   } catch (err) {
     // Fallback: re-encode if stream copy fails (different params)
-    console.warn(`Concat copy failed for episode ${epNum}, re-encoding...`, err);
+    log.warn("Concat copy failed, re-encoding", { episodeNumber: epNum });
     execSync(
-      `ffmpeg -y -f concat -safe 0 -i "${listFile}" -c:v libx264 -preset fast -crf 18 -c:a aac -movflags +faststart "${rawOutputPath}"`,
+      `ffmpeg -y -f concat -safe 1 -i "${listFile}" -c:v libx264 -preset fast -crf 18 -c:a aac -movflags +faststart "${rawOutputPath}"`,
       { timeout: 300000 }
     );
   }
@@ -337,7 +337,7 @@ async function concatMixedVideos(
         await fs.unlink(rawOutputPath).catch(() => {});
       }
     } catch (err) {
-      console.warn(`Subtitle burn failed for episode ${epNum}, using raw video`, err);
+      log.warn("Subtitle burn failed, using raw video", { episodeNumber: epNum });
       finalOutputPath = rawOutputPath;
     }
   }
@@ -399,7 +399,7 @@ async function processVideos(
         // Skip shots that already have aiVideoUrl
         if (shot.aiVideoUrl) {
           shotsSkipped++;
-          console.log(`Episode ${epNum} Shot ${shot.shotNumber}: already has aiVideoUrl, skipping`);
+          log.debug(`Shot ${shot.shotNumber} already has aiVideoUrl, skipping`, { episodeNumber: epNum });
           continue;
         }
 
@@ -407,20 +407,20 @@ async function processVideos(
         // 1. Find the shot's storyboard image
         const shotImagePath = await findShotImage(dramaId, epNum, shot.shotNumber);
         if (!shotImagePath) {
-          console.warn(`Episode ${epNum} Shot ${shot.shotNumber}: no image found, skipping`);
+          log.warn("No image found for shot, skipping", { episodeNumber: epNum, shotNumber: shot.shotNumber });
           continue;
         }
 
         // 2. Upload image to COS and get publicly accessible URL
         const publicImageUrl = await uploadShotImageAndGetPublicUrl(shotImagePath, dramaId, epNum, shot.shotNumber);
         if (!publicImageUrl) {
-          console.warn(`Episode ${epNum} Shot ${shot.shotNumber}: could not get public image URL, skipping`);
+          log.warn("Could not get public image URL for shot, skipping", { episodeNumber: epNum, shotNumber: shot.shotNumber });
           continue;
         }
 
         // 3. Build prompt from shot data
         const prompt = shot.subtitle || shot.line || shot.visual || "电影场景";
-        console.log(`Episode ${epNum} Shot ${shot.shotNumber}: generating AI video (prompt: ${prompt.substring(0, 50)}...)`);
+        log.info("Generating AI video for shot", { episodeNumber: epNum, shotNumber: shot.shotNumber, prompt: prompt.substring(0, 50) });
 
         // 4. Build character reference for this shot
         let shotCharRef: { imageUrl: string; type: "face" | "full_body" } | undefined;
@@ -461,7 +461,7 @@ async function processVideos(
         const isExtProvider = (process.env.VIDEO_PROVIDER || "cogvideo") === "liblib" || (process.env.VIDEO_PROVIDER || "cogvideo") === "kling";
         if (isExtProvider) {
           restoreCosObjectAcl(imageCosKey).catch((err) => {
-            console.warn(`Failed to restore ACL for ${imageCosKey}:`, err);
+            log.warn("Failed to restore ACL", { cosKey: imageCosKey });
           });
           await new Promise((r) => setTimeout(r, 5000));
         }
@@ -475,9 +475,9 @@ async function processVideos(
           // Replace original with mixed version
           await fs.unlink(localVideoPath).catch(() => {});
           await fs.rename(mixedPath, localVideoPath);
-          console.log(`Episode ${epNum} Shot ${shot.shotNumber}: audio mixed into video`);
+          log.debug("Audio mixed into video", { episodeNumber: epNum, shotNumber: shot.shotNumber });
         } catch (err) {
-          console.warn(`Episode ${epNum} Shot ${shot.shotNumber}: no voiceover or mix failed, using video without audio`, err);
+          log.warn("No voiceover or audio mix failed, using video without audio", { episodeNumber: epNum, shotNumber: shot.shotNumber });
         }
 
         shotVideoPaths.push(localVideoPath);
@@ -502,12 +502,12 @@ async function processVideos(
           currentShot: shot.shotNumber,
           stage: "persist",
         });
-        console.log(`Episode ${epNum} Shot ${shot.shotNumber}: AI video saved: ${cosUrl}`);
+        log.info("AI video saved", { episodeNumber: epNum, shotNumber: shot.shotNumber, url: cosUrl });
         } catch (err) {
           if (err instanceof GenerationTaskCancelledError) {
             throw err;
           }
-          console.error(`Failed to generate video for Episode ${epNum} Shot ${shot.shotNumber}:`, err);
+          log.error("Failed to generate video for shot", { episodeNumber: epNum, shotNumber: shot.shotNumber, error: err instanceof Error ? err.message : String(err) });
           // Continue with next shot instead of failing the whole episode
         }
       }
@@ -518,9 +518,9 @@ async function processVideos(
           .update(episodes)
           .set({ shotData: shots })
           .where(eq(episodes.id, episode.id));
-        console.log(`Episode ${epNum}: shotData saved with ${shotsGenerated} new AI videos`);
+        log.info("ShotData saved with new AI videos", { episodeNumber: epNum, shotsGenerated });
       } catch (err) {
-        console.error(`Failed to save shotData for Episode ${epNum}:`, err);
+        log.error("Failed to save shotData", { episodeNumber: epNum, error: err instanceof Error ? err.message : String(err) });
       }
 
       // 8. Concat all shot videos (stream copy, no re-encoding) + burn subtitles
@@ -555,9 +555,9 @@ async function processVideos(
             }));
             const { generateSubtitles } = require("@/lib/ai/subtitle-generator");
             subtitlePath = await generateSubtitles(shots, shotAudios, dramaId, epNum);
-            console.log(`Episode ${epNum}: generated missing subtitles: ${subtitlePath}`);
+            log.info("Generated missing subtitles", { episodeNumber: epNum, subtitlePath });
           } catch (err) {
-            console.warn(`Episode ${epNum}: subtitle generation failed`, err);
+            log.warn("Subtitle generation failed", { episodeNumber: epNum });
           }
         }
 
@@ -579,9 +579,9 @@ async function processVideos(
           .set({ videoUrl: finalUrl })
           .where(eq(episodes.id, episode.id));
 
-        console.log(`Episode ${epNum}: final video saved: ${finalUrl}`);
+        log.info("Final video saved", { episodeNumber: epNum, url: finalUrl });
         } catch (err) {
-          console.error(`Failed to finalize episode ${epNum}:`, err);
+          log.error("Failed to finalize episode", { episodeNumber: epNum, error: err instanceof Error ? err.message : String(err) });
         }
       }
 
@@ -620,12 +620,12 @@ async function processVideos(
       return;
     }
 
-    console.error("Background video processing failed:", error);
+    log.error("Background video processing failed", { error: error instanceof Error ? error.message : String(error) });
     
     // Refund credits if nothing was generated
     if (totalCreditsUsed > 0 && !results.some((r) => r.success && r.shotsGenerated > 0)) {
       log.warn(`No videos generated, refunding ${totalCreditsUsed} credits`, { dramaId, taskId });
-      await refundCredits(userId, totalCreditsUsed, dramaId, "AI 视频生成失败 - 积分退还").catch(console.error);
+      await refundCredits(userId, totalCreditsUsed, dramaId, "AI 视频生成失败 - 积分退还").catch(err => log.error("Failed to refund credits", { error: err instanceof Error ? err.message : String(err) }));
     }
     
     await failGenerationTask(

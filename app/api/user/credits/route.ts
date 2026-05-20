@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getCreditBalance, getUsageLogs } from "@/lib/credits";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("credits-api");
 
 export async function GET() {
   try {
@@ -16,7 +19,7 @@ export async function GET() {
 
     return NextResponse.json({ balance, logs });
   } catch (error) {
-    console.error("Failed to fetch credits:", error);
+    log.error("Failed to fetch credits", { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json({ error: "获取积分信息失败" }, { status: 500 });
   }
 }

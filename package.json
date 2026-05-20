@@ -2,6 +2,26 @@
   "name": "shortify-ai",
   "version": "0.1.0",
   "private": true,
+  "description": "AI-powered short drama creation platform. Generate scripts, storyboards, voiceovers, and videos from a single creative prompt.",
+  "license": "MIT",
+  "author": "ycbing",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ycbing/Shortify-AI"
+  },
+  "keywords": [
+    "ai",
+    "short-drama",
+    "video-generation",
+    "nextjs",
+    "ffmpeg",
+    "text-to-speech",
+    "cogview",
+    "cogvideo"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",

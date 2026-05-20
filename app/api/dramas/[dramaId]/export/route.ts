@@ -7,6 +7,9 @@ import { getSignedCosUrl, cosKeyFromUrl, isCosUrl } from "@/lib/ai/cos-storage";
 import path from "path";
 import fs from "fs/promises";
 import { getOwnedDrama } from "@/lib/dramas";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("dramas-api");
 
 export async function POST(
   request: NextRequest,
@@ -95,7 +98,7 @@ export async function POST(
       format: "episodes",
     });
   } catch (error) {
-    console.error("Export failed:", error);
+    log.error("Export failed", { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: `导出失败: ${error instanceof Error ? error.message : "请稍后重试"}` },
       { status: 500 }

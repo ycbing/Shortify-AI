@@ -17,6 +17,9 @@ import {
   getActiveGenerationTask,
   isGenerationTaskCancelled,
 } from "@/lib/generation";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("script-api");
 
 export async function POST(request: NextRequest) {
   let taskId: string | null = null;
@@ -132,7 +135,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ taskId, script });
   } catch (error) {
-    console.error("Script generation failed:", error);
+    log.error("Script generation failed", { error: error instanceof Error ? error.message : String(error) });
     if (taskId && dramaId) {
       await failGenerationTask(
         taskId,

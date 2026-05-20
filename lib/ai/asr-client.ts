@@ -2,6 +2,9 @@ import { exec } from "child_process";
 import { promisify } from "util";
 import fs from "fs/promises";
 import path from "path";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("asr-client");
 
 const execAsync = promisify(exec);
 
@@ -216,7 +219,7 @@ async function detectSilenceSegments(audioFilePath: string): Promise<SilenceSegm
 
     return segments;
   } catch (error) {
-    console.warn("Silence detection failed:", error);
+    log.warn("Silence detection failed", { error: error instanceof Error ? error.message : String(error) });
     return [];
   }
 }

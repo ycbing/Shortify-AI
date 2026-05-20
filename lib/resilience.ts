@@ -3,6 +3,10 @@
 // ============================================
 // Unified retry, timeout, and concurrency control
 
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("resilience");
+
 export interface RetryOptions {
   /** Maximum retry attempts (default: 3) */
   maxRetries?: number;
@@ -74,9 +78,9 @@ export async function withRetry<T>(
       const delayMs = Math.min(baseDelayMs * Math.pow(2, attempt) + jitter, maxDelayMs);
 
       onRetry?.(attempt + 1, error, delayMs);
-      console.warn(
-        `[resilience] Retry ${attempt + 1}/${maxRetries} after ${Math.round(delayMs)}ms: ${error.message}`
-      );
+      log.warn(`Retry ${attempt + 1}/${maxRetries} after ${Math.round(delayMs)}ms`, {
+        error: error.message,
+      });
 
       await sleep(delayMs);
     }

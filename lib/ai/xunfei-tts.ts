@@ -2,6 +2,9 @@ import WebSocket from "ws";
 import crypto from "crypto";
 import fs from "fs/promises";
 import path from "path";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("xunfei-tts");
 
 // ============ Config ============
 

@@ -5,6 +5,9 @@ import { eq } from "drizzle-orm";
 import { checkRateLimit } from "@/lib/rate-limiter";
 import { sendEmail, buildResetEmailHtml } from "@/lib/email";
 import { createToken } from "@/lib/tokens";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("auth-api");
 
 export async function POST(request: NextRequest) {
   try {
@@ -45,7 +48,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ message: "如果该邮箱已注册，你将收到重置邮件" });
   } catch (error) {
-    console.error("Forgot password failed:", error);
+    log.error("Forgot password failed", { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json({ error: "发送失败，请稍后重试" }, { status: 500 });
   }
 }

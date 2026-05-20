@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getTaskForUser, getTaskWithProgressForUser } from "@/lib/services/tasks";
 import { cancelGenerationTask } from "@/lib/generation";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("tasks-api");
 
 export async function GET(
   _request: NextRequest,
@@ -23,7 +26,7 @@ export async function GET(
 
     return NextResponse.json({ task });
   } catch (error) {
-    console.error("Failed to fetch task:", error);
+    log.error("Failed to fetch task", { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json({ error: "获取任务详情失败" }, { status: 500 });
   }
 }
@@ -53,7 +56,7 @@ export async function DELETE(
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("Failed to cancel task:", error);
+    log.error("Failed to cancel task", { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json({ error: "取消任务失败" }, { status: 500 });
   }
 }

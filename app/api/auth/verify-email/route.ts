@@ -3,6 +3,9 @@ import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { verifyToken } from "@/lib/tokens";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("auth-api");
 
 export async function GET(request: NextRequest) {
   try {
@@ -29,7 +32,7 @@ export async function GET(request: NextRequest) {
       new URL("/sign-in?verified=1", request.url)
     );
   } catch (error) {
-    console.error("Email verification failed:", error);
+    log.error("Email verification failed", { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json({ error: "验证失败" }, { status: 500 });
   }
 }

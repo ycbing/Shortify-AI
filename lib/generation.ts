@@ -4,6 +4,9 @@ import { db } from "@/lib/db";
 import { dramas, generationTasks } from "@/lib/db/schema";
 import { inferDramaStatus, updateDramaStatus } from "@/lib/drama-status";
 import { taskEventBus, type TaskEvent } from "@/lib/task-event-bus";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("generation");
 
 const GENERATION_TASK_HEARTBEAT_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes (was 15)
 
@@ -65,7 +68,7 @@ export async function expireGenerationTask(
   dramaId: string,
   errorMessage = "任务已超时失效，请重新发起生成"
 ) {
-  console.error(`[generation] Task expired: ${taskId} for drama ${dramaId}`);
+  log.error(`Task expired`, { taskId, dramaId });
   await db
     .update(generationTasks)
     .set({
@@ -259,7 +262,7 @@ export async function failGenerationTask(
   dramaId: string,
   errorMessage: string
 ) {
-  console.error(`[generation] Task failed: ${taskId} for drama ${dramaId}: ${errorMessage}`);
+  log.error(`Task failed`, { taskId, dramaId, errorMessage });
   await db
     .update(generationTasks)
     .set({

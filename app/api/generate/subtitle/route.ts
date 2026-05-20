@@ -7,6 +7,9 @@ import { v4 as uuidv4 } from "uuid";
 import { generateSubtitles, generateSubtitlesWithASR } from "@/lib/ai/subtitle-generator";
 import { isAsrConfigured } from "@/lib/ai/asr-client";
 import type { Shot, ShotAudio } from "@/types/drama";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("subtitle-api");
 
 export async function POST(request: NextRequest) {
   try {
@@ -77,7 +80,7 @@ export async function POST(request: NextRequest) {
 
     for (const episode of targetEpisodes) {
       if (!episode.shotData || !Array.isArray(episode.shotData)) {
-        console.log(`Episode ${episode.episodeNumber} has no shotData, skipping`);
+        log.debug(`Episode ${episode.episodeNumber} has no shotData, skipping`);
         continue;
       }
 
@@ -143,7 +146,7 @@ export async function POST(request: NextRequest) {
       asrAvailable: isAsrConfigured(),
     });
   } catch (error) {
-    console.error("Subtitle generation failed:", error);
+    log.error("Subtitle generation failed", { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: `字幕生成失败: ${error instanceof Error ? error.message : "未知错误"}` },
       { status: 500 }

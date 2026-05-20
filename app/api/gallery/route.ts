@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPublicDramas, toPublicCoverUrl } from "@/lib/public-dramas";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("gallery-api");
 
 export async function GET(req: NextRequest) {
   try {
@@ -18,7 +21,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ dramas: processed, total, page, pageSize });
   } catch (error) {
-    console.error("Gallery API error:", error);
+    log.error("Gallery API error", { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json({ error: "获取作品列表失败" }, { status: 500 });
   }
 }

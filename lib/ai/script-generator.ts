@@ -7,6 +7,9 @@ import type {
   DramaGenreType,
   DramaStyleType,
 } from "@/types/drama";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("script-gen");
 
 const GENRE_MAP: Record<DramaGenreType, string> = {
   mystery: "悬疑",

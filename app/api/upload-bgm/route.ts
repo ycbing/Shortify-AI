@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("upload-api");
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR || "./uploads";
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
@@ -69,7 +72,7 @@ export async function POST(request: NextRequest) {
       const hasMp3Header = (buffer[0] === 0xFF && (buffer[1] & 0xE0) === 0xE0);
       if (!hasMp3Header && buffer[0] !== 0x49) { // 0x49 = 'I' for ID3 tag
         // Don't reject, just warn
-        console.warn("BGM upload: file has .mp3 extension but no valid MP3 header");
+        log.warn("BGM upload: file has .mp3 extension but no valid MP3 header");
       }
     }
 
@@ -79,7 +82,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ bgmUrl });
   } catch (error) {
-    console.error("BGM upload failed:", error);
+    log.error("BGM upload failed", { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: `上传失败: ${error instanceof Error ? error.message : "未知错误"}` },
       { status: 500 }

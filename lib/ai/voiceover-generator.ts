@@ -155,9 +155,9 @@ export async function generateShotVoiceovers(
         character: shot.character,
       });
     } catch (err) {
-      console.error(
-        `Failed to generate voiceover for shot ${shot.shotNumber}:`,
-        err
+      log.error(
+        `Failed to generate voiceover for shot ${shot.shotNumber}`,
+        { error: err instanceof Error ? err.message : String(err) }
       );
       // Fallback: silent audio
       const dir = path.dirname(outputPath);

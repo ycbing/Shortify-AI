@@ -3,6 +3,9 @@ import { promisify } from "util";
 import path from "path";
 import fs from "fs/promises";
 import type { Shot, ShotAudio } from "@/types/drama";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("video-composer");
 
 const execAsync = promisify(exec);
 
@@ -257,7 +260,7 @@ export async function composeEpisodeFromShots(
   for (const shot of shots) {
     const audio = audioMap.get(shot.shotNumber);
     if (!audio) {
-      console.warn(`No audio for shot ${shot.shotNumber}, skipping`);
+      log.warn(`No audio for shot ${shot.shotNumber}, skipping`);
       continue;
     }
 
@@ -296,7 +299,7 @@ export async function composeEpisodeFromShots(
     await fs.writeFile(concatListPath, concatContent);
 
     // Re-encode to ensure compatible formats with high quality
-    const cmd = `ffmpeg -f concat -safe 0 -i "${concatListPath}" -c:v libx264 -crf 18 -preset medium -c:a aac -b:a 128k -movflags +faststart -y "${rawOutputPath}"`;
+    const cmd = `ffmpeg -f concat -safe 1 -i "${concatListPath}" -c:v libx264 -crf 18 -preset medium -c:a aac -b:a 128k -movflags +faststart -y "${rawOutputPath}"`;
     await execAsync(cmd, { timeout: 300000 });
   }
 
@@ -309,7 +312,7 @@ export async function composeEpisodeFromShots(
 
     // Remove raw version if it's a separate file
     if (rawOutputPath !== outputPath) {
-      await fs.unlink(rawOutputPath).catch(() => {});
+      await fs.unlink(rawOutputPath).catch(() => {}); // best-effort cleanup
     }
   }
 
@@ -330,7 +333,7 @@ export async function composeEpisodeFromShots(
     const bgmMixedPath = path.join(episodeDir, `episode-${episodeNumber}-bgm.mp4`);
     const cmd = `ffmpeg -i "${finalOutputPath}" -i "${options.bgmPath}" -filter_complex "[1:a]volume=${bgmVol},afade=t=in:st=0:d=1,afade=t=out:st=${fadeOutStart}:d=2[bgm];[0:a][bgm]amix=inputs=2:duration=first:dropout_transition=2[aout]" -map 0:v -map "[aout]" -c:v copy -c:a aac -movflags +faststart -y "${bgmMixedPath}"`;
     await execAsync(cmd, { timeout: 300000 }).catch(async (err) => {
-      console.warn("BGM mixing failed, using video without BGM:", err);
+      log.warn("BGM mixing failed, using video without BGM", { error: err instanceof Error ? err.message : String(err) });
       return;
     });
     // Replace with BGM-mixed version
@@ -338,7 +341,7 @@ export async function composeEpisodeFromShots(
       await fs.access(bgmMixedPath);
       if (bgmMixedPath !== outputPath && bgmMixedPath !== finalOutputPath) {
         if (finalOutputPath !== outputPath) {
-          await fs.unlink(finalOutputPath).catch(() => {});
+          await fs.unlink(finalOutputPath).catch(() => {}); // best-effort cleanup
         }
         await fs.rename(bgmMixedPath, outputPath);
       }
@@ -349,7 +352,7 @@ export async function composeEpisodeFromShots(
   }
 
   // Clean up temp files
-  await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+  await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {}); // best-effort cleanup
 
   return outputPath;
 }
@@ -376,7 +379,7 @@ export async function mergeVideos(
   const concatContent = videoPaths.map((p) => `file '${p}'`).join("\n");
   await fs.writeFile(concatListPath, concatContent);
 
-  const cmd = `ffmpeg -f concat -safe 0 -i "${concatListPath}" -c copy -y "${outputPath}"`;
+  const cmd = `ffmpeg -f concat -safe 1 -i "${concatListPath}" -c copy -y "${outputPath}"`;
   await execAsync(cmd, { timeout: 300000 });
 
   await fs.unlink(concatListPath).catch(() => {});

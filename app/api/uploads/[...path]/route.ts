@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import fs from "fs/promises";
 import path from "path";
 import { getSignedCosUrl } from "@/lib/ai/cos-storage";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("uploads-api");
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR || "./uploads";
 
@@ -78,7 +81,7 @@ export async function GET(
 
     return new NextResponse(buffer, { headers });
   } catch (error) {
-    console.error("Uploads route error:", error);
+    log.error("Uploads route error", { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: "Failed to serve file" },
       { status: 500 }

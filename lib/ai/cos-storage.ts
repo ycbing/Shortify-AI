@@ -1,6 +1,9 @@
 import COS from "cos-nodejs-sdk-v5";
 import { readFile } from "fs/promises";
 import path from "path";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("cos-storage");
 
 // Check if COS is configured
 export function isCosConfigured(): boolean {
@@ -115,7 +118,7 @@ export async function uploadToCos(
       },
       (err, _data) => {
         if (err) {
-          console.error(`COS upload failed for ${cosKey}:`, err.message);
+          log.error("COS upload failed", { cosKey, error: err.message });
           reject(err);
         } else {
           resolve(getCosUrl(cosKey));
@@ -142,7 +145,7 @@ export async function deleteFromCos(cosKey: string): Promise<void> {
       },
       (err, _data) => {
         if (err) {
-          console.error(`COS delete failed for ${cosKey}:`, err.message);
+          log.error("COS delete failed", { cosKey, error: err.message });
           reject(err);
         } else {
           resolve();
@@ -171,7 +174,7 @@ export async function makeCosObjectPublic(cosKey: string): Promise<string> {
       },
       (err, _data) => {
         if (err) {
-          console.error(`Failed to set public-read ACL for ${cosKey}:`, err.message);
+          log.error("Failed to set public-read ACL", { cosKey, error: err.message });
           reject(err);
         } else {
           resolve(getCosUrl(cosKey));
@@ -198,7 +201,7 @@ export async function restoreCosObjectAcl(cosKey: string): Promise<void> {
       },
       (err) => {
         if (err) {
-          console.warn(`Failed to restore private ACL for ${cosKey}:`, err.message);
+          log.warn("Failed to restore private ACL", { cosKey, error: err.message });
         }
         resolve();
       }
@@ -221,15 +224,15 @@ export async function uploadFileToCos(
   try {
     const cosUrl = await uploadToCos(localPath, cosKey);
     if (cosUrl) {
-      console.log(`COS upload success: ${cosKey} -> ${cosUrl}`);
+      log.info(`COS upload success: ${cosKey} -> ${cosUrl}`);
       return cosUrl;
     }
     // Fallback to local path
     return localPath;
   } catch (err) {
-    console.warn(
-      `COS upload failed for ${cosKey}, falling back to local path:`,
-      err
+    log.warn(
+      `COS upload failed for ${cosKey}, falling back to local path`,
+      { error: err instanceof Error ? err.message : String(err) }
     );
     return localPath;
   }

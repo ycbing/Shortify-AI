@@ -1,5 +1,9 @@
 # Shortify AI 🎬
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D18-green.svg)](.nvmrc)
+[![Next.js](https://img.shields.io/badge/Next.js-16-black.svg)](package.json)
+
 AI 驱动的短剧创作平台，从创意到成片一键搞定。
 
 ## ✨ 功能特性
@@ -44,6 +48,20 @@ AI 驱动的短剧创作平台，从创意到成片一键搞定。
 
 ### 安装与运行
 
+#### 方式一：Docker（推荐）
+
+```bash
+git clone https://github.com/ycbing/Shortify-AI.git
+cd Shortify-AI
+cp .env.example .env.local
+# 编辑 .env.local，填入 GLM_API_KEY 等必要配置
+docker compose up -d
+```
+
+访问 http://localhost:3000
+
+#### 方式二：本地开发
+
 ```bash
 # 克隆项目
 git clone https://github.com/ycbing/Shortify-AI.git
@@ -66,19 +84,24 @@ npm run dev
 
 ### 环境变量
 
-| 变量 | 说明 |
-|------|------|
-| `DATABASE_URL` | PostgreSQL 连接字符串 |
-| `AUTH_SECRET` | NextAuth 密钥 |
-| `GLM_API_KEY` | 智谱 AI API Key |
-| `IMAGE_MODEL` | 生图模型（默认 cogview-3-plus） |
-| `XUNFEI_APPID` | 讯飞 TTS AppID |
-| `XUNFEI_API_KEY` | 讯飞 TTS API Key |
-| `XUNFEI_API_SECRET` | 讯飞 TTS API Secret |
-| `COS_SECRET_ID` | 腾讯云 COS SecretId |
-| `COS_SECRET_KEY` | 腾讯云 COS SecretKey |
-| `COS_BUCKET` | COS 桶名 |
-| `COS_REGION` | COS 地域 |
+| 变量 | 必填 | 说明 |
+|------|------|------|
+| `DATABASE_URL` | 是 | PostgreSQL 连接字符串 |
+| `NEXTAUTH_URL` | 是 | 应用 URL |
+| `NEXTAUTH_SECRET` | 是 | NextAuth 密钥 |
+| `GLM_API_KEY` | 是 | 智谱 AI API Key |
+| `GLM_BASE_URL` | 否 | 智谱 API 地址（默认官方地址） |
+| `IMAGE_MODEL` | 否 | 生图模型（默认 cogview-3-plus） |
+| `VIDEO_MODEL` | 否 | 视频模型（默认 cogvideox-3） |
+| `VIDEO_PROVIDER` | 否 | 视频提供商（cogvideo / kling / liblib） |
+| `XUNFEI_APPID` | 否 | 讯飞 TTS AppID（未配置则使用 Edge-TTS） |
+| `XUNFEI_API_KEY` | 否 | 讯飞 TTS API Key |
+| `XUNFEI_API_SECRET` | 否 | 讯飞 TTS API Secret |
+| `COS_SECRET_ID` | 否 | 腾讯云 COS SecretId（未配置则本地存储） |
+| `COS_SECRET_KEY` | 否 | 腾讯云 COS SecretKey |
+| `COS_BUCKET` | 否 | COS 桶名 |
+| `COS_REGION` | 否 | COS 地域 |
+| `UPLOAD_DIR` | 否 | 上传目录（默认 ./uploads） |
 
 ## 📁 项目结构
 

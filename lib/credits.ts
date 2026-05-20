@@ -6,6 +6,9 @@ import { db } from "@/lib/db";
 import { users, usageLogs } from "@/lib/db/schema";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("credits");
 
 // Credit costs per operation
 export const CREDIT_COSTS = {
@@ -91,7 +94,7 @@ export async function deductCredits(
       return { ok: true, balance: updated.credits ?? 0 };
     });
   } catch (error) {
-    console.error("Failed to deduct credits:", error);
+    log.error("Failed to deduct credits", { error: error instanceof Error ? error.message : String(error) });
     return {
       ok: false,
       balance: await getCreditBalance(userId),

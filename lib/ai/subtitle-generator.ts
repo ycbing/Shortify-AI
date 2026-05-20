@@ -2,6 +2,9 @@ import path from "path";
 import fs from "fs/promises";
 import type { Shot, ShotAudio } from "@/types/drama";
 import { transcribeAudio, isAsrConfigured } from "@/lib/ai/asr-client";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("subtitle-gen");
 
 // ============ Mode: generateSubtitles (基于文本+时长的传统模式) ============
 

@@ -1,8 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  output: "standalone",
   serverExternalPackages: ["bcryptjs"],
-  allowedDevOrigins: ["YOUR_SERVER_IP", "craftmind.cn", "www.craftmind.cn"],
+  allowedDevOrigins: [],
   images: {
     remotePatterns: [
       {

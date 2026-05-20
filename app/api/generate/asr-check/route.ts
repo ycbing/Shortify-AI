@@ -6,6 +6,9 @@ import { eq, and } from "drizzle-orm";
 import { generateSubtitlesWithASR } from "@/lib/ai/subtitle-generator";
 import { isAsrConfigured } from "@/lib/ai/asr-client";
 import type { Shot, ShotAudio } from "@/types/drama";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("asr-api");
 
 /**
  * POST /api/generate/asr-check
@@ -108,7 +111,7 @@ export async function POST(request: NextRequest) {
       episodes: results,
     });
   } catch (error) {
-    console.error("ASR check failed:", error);
+    log.error("ASR check failed", { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: `ASR 质量检测失败: ${error instanceof Error ? error.message : "未知错误"}` },
       { status: 500 }
@@ -153,8 +156,12 @@ async function reconstructShotAudios(
           `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${audioPath}"`
         );
         duration = parseFloat(stdout.trim()) || duration;
-      } catch {}
-    } catch {}
+      } catch {
+        // duration probe failed, using default
+      }
+    } catch {
+      // audio file not found, using default duration
+    }
 
     shotAudios.push({
       shotNumber: shot.shotNumber,

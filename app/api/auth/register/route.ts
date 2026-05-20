@@ -8,6 +8,9 @@ import { registerSchema } from "@/lib/validation";
 import { checkRateLimit } from "@/lib/rate-limiter";
 import { sendEmail, buildVerifyEmailHtml } from "@/lib/email";
 import { createToken } from "@/lib/tokens";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("auth-api");
 
 export async function POST(request: NextRequest) {
   try {
@@ -75,7 +78,7 @@ export async function POST(request: NextRequest) {
       email,
     });
   } catch (error) {
-    console.error("Registration failed:", error);
+    log.error("Registration failed", { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: "注册失败，请稍后重试" },
       { status: 500 }

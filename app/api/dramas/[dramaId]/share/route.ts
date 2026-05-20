@@ -3,6 +3,9 @@ import { db } from "@/lib/db";
 import { dramas, episodes } from "@/lib/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { PUBLIC_DRAMA_STATUSES } from "@/lib/public-dramas";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("dramas-api");
 
 /**
  * GET /api/dramas/[dramaId]/share
@@ -69,7 +72,7 @@ export async function GET(
       shareUrl,
     });
   } catch (error) {
-    console.error("Failed to get share info:", error);
+    log.error("Failed to get share info", { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json({ error: "获取分享信息失败" }, { status: 500 });
   }
 }

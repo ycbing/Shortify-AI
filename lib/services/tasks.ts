@@ -2,6 +2,9 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { dramas, episodes, generationTasks } from "@/lib/db/schema";
 import { buildTaskPresentation } from "@/lib/task-presentation";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("tasks-service");
 
 type JsonRecord = Record<string, unknown>;
 

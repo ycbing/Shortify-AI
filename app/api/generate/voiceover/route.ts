@@ -269,7 +269,7 @@ export async function POST(request: NextRequest) {
       uploadDir,
       allEpisodes,
       autoCompose,
-    }).catch(console.error).finally(() => releaseUserSlot(session.user.id));
+    }).catch(err => log.error("Background voiceover processing failed", { error: err instanceof Error ? err.message : String(err) })).finally(() => releaseUserSlot(session.user.id));
 
     return NextResponse.json({
       taskId,
@@ -277,7 +277,7 @@ export async function POST(request: NextRequest) {
       episodeCount: allEpisodes.length,
     });
   } catch (error) {
-    console.error("Voiceover generation failed:", error);
+    log.error("Voiceover generation failed", { error: error instanceof Error ? error.message : String(error) });
     if (taskId && dramaId) {
       await failGenerationTask(
         taskId,
@@ -651,7 +651,7 @@ async function processVoiceoverGeneration({
     // Refund credits if nothing was generated
     if (creditsUsed > 0 && !results.some((r) => r.voiceoverUrl)) {
       log.warn(`No voiceover generated, refunding ${creditsUsed} credits`, { dramaId, taskId });
-      await refundCredits(userId, creditsUsed, dramaId, "配音生成失败 - 积分退还").catch(console.error);
+      await refundCredits(userId, creditsUsed, dramaId, "配音生成失败 - 积分退还").catch(err => log.error("Failed to refund credits", { error: err instanceof Error ? err.message : String(err) }));
     }
 
     await failGenerationTask(

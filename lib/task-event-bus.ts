@@ -4,6 +4,10 @@
 // Lightweight event emitter for broadcasting task progress updates
 // to WebSocket connections. No Redis dependency needed for single-server.
 
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("task-bus");
+
 type EventCallback = (data: TaskEvent) => void;
 
 export interface TaskEvent {
@@ -62,7 +66,7 @@ class TaskEventBus {
         try {
           cb(event);
         } catch (err) {
-          console.error("[event-bus] Listener error:", err);
+          log.error("Listener error", { error: err instanceof Error ? err.message : String(err) });
         }
       }
     }
@@ -72,7 +76,7 @@ class TaskEventBus {
       try {
         cb(event);
       } catch (err) {
-        console.error("[event-bus] Global listener error:", err);
+        log.error("Global listener error", { error: err instanceof Error ? err.message : String(err) });
       }
     }
   }

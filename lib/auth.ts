@@ -5,6 +5,9 @@ import { db } from "@/lib/db";
 import { users, userPasswords } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { INITIAL_USER_CREDITS } from "@/lib/constants";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("auth");
 
 async function verifyPassword(
   email: string,
@@ -24,7 +27,7 @@ async function verifyPassword(
 
     return { id: rows[0].userId, email: rows[0].email };
   } catch (error) {
-    console.error("Password verification failed:", error);
+    log.error("Password verification failed", { error: error instanceof Error ? error.message : String(error) });
     return null;
   }
 }
@@ -97,7 +100,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           });
         }
       } catch (error) {
-        console.error("Failed to create/update user:", error);
+        log.error("Failed to create/update user", { error: error instanceof Error ? error.message : String(error) });
       }
 
       return true;

@@ -74,7 +74,7 @@ async function main() {
       try {
         const { stdout } = await execAsync(`ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${audioPath}"`);
         audioDuration = parseFloat(stdout.trim()) || audioDuration;
-      } catch {}
+      } catch { /* ffprobe failed, using default duration */ }
 
       const totalFrames = Math.max(1, Math.ceil(audioDuration * 25));
       const effect = pickKenBurnsEffect(shot.shotNumber);

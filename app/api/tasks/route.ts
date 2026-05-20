@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { listTasksForUser } from "@/lib/services/tasks";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("tasks-api");
 
 export async function GET(request: NextRequest) {
   try {
@@ -27,7 +30,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ tasks });
   } catch (error) {
-    console.error("Failed to fetch tasks:", error);
+    log.error("Failed to fetch tasks", { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json({ error: "获取任务失败" }, { status: 500 });
   }
 }

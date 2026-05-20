@@ -3,7 +3,7 @@ module.exports = {
     name: 'shortify-ai',
     script: 'npm',
     args: 'start',
-    cwd: 'YOUR_PROJECT_PATH',
+    cwd: process.cwd(),
     env: {
       NODE_ENV: 'production',
       PORT: 8000,

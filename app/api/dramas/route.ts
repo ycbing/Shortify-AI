@@ -5,6 +5,9 @@ import { dramas, episodes } from "@/lib/db/schema";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { createDramaSchema } from "@/lib/validation";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("dramas-api");
 
 export async function GET(request: NextRequest) {
   try {
@@ -61,7 +64,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ dramas: dramasWithEpisodes });
   } catch (error) {
-    console.error("Failed to fetch dramas:", error);
+    log.error("Failed to fetch dramas", { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json({ error: "获取短剧列表失败" }, { status: 500 });
   }
 }
@@ -107,7 +110,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ drama }, { status: 201 });
   } catch (error) {
-    console.error("Failed to create drama:", error);
+    log.error("Failed to create drama", { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json({ error: "创建短剧失败" }, { status: 500 });
   }
 }
