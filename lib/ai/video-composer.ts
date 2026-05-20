@@ -2,6 +2,10 @@ import { exec } from "child_process";
 import { promisify } from "util";
 import path from "path";
 import fs from "fs/promises";
+import { createWriteStream } from "fs";
+import https from "https";
+import http from "http";
+import { isCosUrl, cosKeyFromUrl, getSignedCosUrl } from "./cos-storage";
 import type { Shot, ShotAudio } from "@/types/drama";
 import { createLogger } from "@/lib/logger";
 
@@ -33,9 +37,14 @@ export async function composeVideo(options: ComposeOptions): Promise<string> {
   const dir = path.dirname(outputPath);
   await fs.mkdir(dir, { recursive: true });
 
+  // Download remote images (COS URLs) to local before passing to ffmpeg
+  const localImagePath = imagePath.startsWith("http")
+    ? await ensureLocalImage(imagePath, 1, dir)
+    : imagePath;
+
   if (subtitlePath) {
     // Subtitle version — simplified without fade for compatibility
-    const cmd = `ffmpeg -loop 1 -i "${imagePath}" -i "${audioPath}" -vf "scale=${resolution}:force_original_aspect_ratio=decrease,pad=${resolution}:(ow-iw)/2:(oh-ih)/2:color=black,subtitles='${subtitlePath}'" -c:v libx264 -c:a aac -shortest -y "${outputPath}"`;
+    const cmd = `ffmpeg -loop 1 -i "${localImagePath}" -i "${audioPath}" -vf "scale=${resolution}:force_original_aspect_ratio=decrease,pad=${resolution}:(ow-iw)/2:(oh-ih)/2:color=black,subtitles='${subtitlePath}'" -c:v libx264 -c:a aac -shortest -y "${outputPath}"`;
     await execAsync(cmd, { timeout: 120000 });
   } else {
     // Get audio duration for fade out
@@ -51,7 +60,7 @@ export async function composeVideo(options: ComposeOptions): Promise<string> {
 
     const vfFilter = `scale=${resolution}:force_original_aspect_ratio=decrease,pad=${resolution}:(ow-iw)/2:(oh-ih)/2:color=black,fade=t=in:st=0:d=${fadeDuration},fade=t=out:st=${audioDuration - fadeDuration}:d=${fadeDuration}`;
 
-    const cmd = `ffmpeg -loop 1 -i "${imagePath}" -i "${audioPath}" -vf "${vfFilter}" -c:v libx264 -c:a aac -shortest -y "${outputPath}"`;
+    const cmd = `ffmpeg -loop 1 -i "${localImagePath}" -i "${audioPath}" -vf "${vfFilter}" -c:v libx264 -c:a aac -shortest -y "${outputPath}"`;
     await execAsync(cmd, { timeout: 120000 });
   }
 
@@ -172,6 +181,8 @@ async function composeShotVideo(
 
   // Otherwise: image + smooth motion + audio
   if (input.imageUrl) {
+    // Download remote images (COS URLs) to local before passing to ffmpeg
+    const localImagePath = await ensureLocalImage(input.imageUrl, shot.shotNumber, outputDir);
     const duration = shotAudio.duration;
     const fadeDuration = Math.min(0.5, duration * 0.15);
 
@@ -210,7 +221,7 @@ async function composeShotVideo(
     }
 
     const filterComplex = `[0:v]${motionFilter},fade=t=in:st=0:d=${fadeDuration},fade=t=out:st=${Math.max(0, duration - fadeDuration)}:d=${fadeDuration}[v];[1:a]aformat=sample_rates=44100:channel_layouts=stereo[a]`;
-    const cmd = `ffmpeg -loop 1 -i "${input.imageUrl}" -i "${shotAudio.audioUrl}" -filter_complex "${filterComplex}" -map "[v]" -map "[a]" -c:v libx264 -crf 18 -preset medium -t ${duration} -pix_fmt yuv420p -shortest -y "${outputPath}"`;
+    const cmd = `ffmpeg -loop 1 -i "${localImagePath}" -i "${shotAudio.audioUrl}" -filter_complex "${filterComplex}" -map "[v]" -map "[a]" -c:v libx264 -crf 18 -preset medium -t ${duration} -pix_fmt yuv420p -shortest -y "${outputPath}"`;
     await execAsync(cmd, { timeout: 180000 });
     return outputPath;
   }
@@ -219,6 +230,58 @@ async function composeShotVideo(
   const cmd = `ffmpeg -f lavfi -i color=c=black:s=1920x1080:d=${shotAudio.duration} -i "${shotAudio.audioUrl}" -c:v libx264 -crf 18 -preset medium -c:a aac -shortest -y "${outputPath}"`;
   await execAsync(cmd, { timeout: 120000 });
   return outputPath;
+}
+
+/**
+ * Ensure an image path is a local file. If it's a remote URL (COS or otherwise),
+ * download it to a temp file and return the local path.
+ */
+async function ensureLocalImage(imageUrl: string, shotNumber: number, outputDir: string): Promise<string> {
+  if (!imageUrl.startsWith("http")) {
+    // Already a local path — verify it exists
+    await fs.access(imageUrl);
+    return imageUrl;
+  }
+
+  // Remote URL — download to local temp file
+  const localPath = path.join(outputDir, `shot-${shotNumber}-downloaded.jpg`);
+  try {
+    await fs.access(localPath);
+    return localPath; // Already downloaded
+  } catch {
+    // Need to download
+  }
+
+  // For COS private URLs, get a signed URL
+  let fetchUrl = imageUrl;
+  if (isCosUrl(imageUrl)) {
+    const cosKey = cosKeyFromUrl(imageUrl);
+    if (cosKey) {
+      fetchUrl = getSignedCosUrl(cosKey, 3600);
+    }
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    const doGet = (url: string) => {
+      const mod = url.startsWith("https") ? https : http;
+      mod.get(url, (res) => {
+        if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          doGet(res.headers.location);
+          return;
+        }
+        if (res.statusCode !== 200) {
+          reject(new Error(`HTTP ${res.statusCode} fetching ${url}`));
+          return;
+        }
+        const file = createWriteStream(localPath);
+        res.pipe(file);
+        file.on("finish", () => { file.close(); resolve(); });
+      }).on("error", reject);
+    };
+    doGet(fetchUrl);
+  });
+
+  return localPath;
 }
 
 /**
@@ -291,15 +354,19 @@ export async function composeEpisodeFromShots(
     // Just rename/copy the single file
     await fs.copyFile(shotVideoPaths[0], rawOutputPath);
   } else {
-    // Use ffmpeg concat demuxer
-    const concatListPath = path.join(tempDir, "concat-list.txt");
-    const concatContent = shotVideoPaths
-      .map((p) => `file '${p}'`)
-      .join("\n");
-    await fs.writeFile(concatListPath, concatContent);
+    // Normalize each shot to TS with uniform audio params, then concat via concat protocol
+    // This avoids AAC incompatibility issues when audio sources have different
+    // sample rates or channel layouts (e.g. 44100Hz stereo vs 16000Hz mono)
+    const tsPaths: string[] = [];
+    for (const shotPath of shotVideoPaths) {
+      const tsPath = path.join(tempDir, `${path.basename(shotPath, '.mp4')}.ts`);
+      const normCmd = `ffmpeg -i "${shotPath}" -c:v libx264 -crf 18 -preset medium -c:a aac -ar 44100 -ac 2 -b:a 128k -bsf:v h264_mp4toannexb -f mpegts -y "${tsPath}"`;
+      await execAsync(normCmd, { timeout: 180000 });
+      tsPaths.push(tsPath);
+    }
 
-    // Re-encode to ensure compatible formats with high quality
-    const cmd = `ffmpeg -f concat -safe 1 -i "${concatListPath}" -c:v libx264 -crf 18 -preset medium -c:a aac -b:a 128k -movflags +faststart -y "${rawOutputPath}"`;
+    const concatInput = tsPaths.join('|');
+    const cmd = `ffmpeg -i "concat:${concatInput}" -c copy -bsf:a aac_adtstoasc -movflags +faststart -y "${rawOutputPath}"`;
     await execAsync(cmd, { timeout: 300000 });
   }
 
