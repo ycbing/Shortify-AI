@@ -77,7 +77,7 @@ async function getClipDuration(filePath: string): Promise<number> {
  * Concatenate video clips with xfade transitions.
  * Processes clips pair by pair to build the final output.
  */
-async function concatWithXfade(
+export async function concatWithXfade(
   clipPaths: string[],
   outputPath: string,
   transition: TransitionType = "fade",

@@ -17,6 +17,7 @@ export const CREDIT_COSTS = {
   voiceover: 5,      // 生成配音（每集）
   compose: 5,        // 合成视频（每集）
   video: 20,         // AI 视频生成（每个镜头）
+  narration: 5,      // 短视频解说生成
 } as const;
 
 export type CreditType = keyof typeof CREDIT_COSTS;
@@ -28,6 +29,7 @@ export const CREDIT_LABELS: Record<CreditType, string> = {
   voiceover: "生成配音",
   compose: "合成视频",
   video: "AI 视频生成",
+  narration: "短视频解说",
 };
 
 /**
