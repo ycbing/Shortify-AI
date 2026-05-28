@@ -86,6 +86,11 @@ export default function PreviewPageContent() {
   const [taskProgressLabel, setTaskProgressLabel] = useState("");
   const [taskHistory, setTaskHistory] = useState<TaskSummary[]>([]);
 
+  // Video composition options
+  const [materialSource, setMaterialSource] = useState<"ai" | "pexels">("ai");
+  const [transition, setTransition] = useState<string>("fade");
+  const [transitionDuration, setTransitionDuration] = useState<number>(0.5);
+
   const fetchEpisodes = useCallback(async (showLoading = true) => {
     if (!dramaId) return;
     if (showLoading) setLoading(true);
@@ -396,7 +401,12 @@ export default function PreviewPageContent() {
       const res = await fetch("/api/compose", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dramaId }),
+        body: JSON.stringify({
+          dramaId,
+          materialSource: materialSource === "pexels" ? "pexels" : undefined,
+          transition: transition !== "none" ? transition : undefined,
+          transitionDuration: transitionDuration,
+        }),
       });
 
       const data = await res.json().catch(() => ({}));
@@ -833,12 +843,101 @@ export default function PreviewPageContent() {
                 </Button>
               </div>
 
-              {/* FFmpeg 幻灯片合成 */}
+              {/* Video composition with options */}
               <div className="border border-border/50 rounded-lg p-4 sm:p-6 bg-card/50">
-                <h3 className="font-semibold text-sm sm:text-base mb-2">幻灯片合成（手动重试）</h3>
+                <div className="flex items-center gap-2 mb-3">
+                  <Film className="h-5 w-5 text-emerald-400" />
+                  <h3 className="font-semibold text-sm sm:text-base">视频合成</h3>
+                </div>
                 <p className="text-xs sm:text-sm text-muted-foreground mb-4">
-                  使用 Ken Burns 效果将分镜图片和配音合成为幻灯片视频。配音完成后已自动合成，此处用于手动重试。
+                  将分镜画面和配音合成为完整剧集视频，支持转场效果和真实视频素材。
                 </p>
+
+                {/* Material source selector */}
+                <div className="mb-4">
+                  <label className="text-xs font-medium text-muted-foreground mb-2 block">素材来源</label>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setMaterialSource("ai")}
+                      className={`flex-1 px-3 py-2.5 rounded-lg border text-xs sm:text-sm font-medium transition-all ${
+                        materialSource === "ai"
+                          ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-400"
+                          : "border-border/50 bg-card/30 text-muted-foreground hover:border-border"
+                      }`}
+                    >
+                      🎨 AI 生图
+                    </button>
+                    <button
+                      onClick={() => setMaterialSource("pexels")}
+                      className={`flex-1 px-3 py-2.5 rounded-lg border text-xs sm:text-sm font-medium transition-all ${
+                        materialSource === "pexels"
+                          ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-400"
+                          : "border-border/50 bg-card/30 text-muted-foreground hover:border-border"
+                      }`}
+                    >
+                      🎬 真实视频
+                    </button>
+                  </div>
+                  {materialSource === "pexels" && (
+                    <p className="text-xs text-amber-400 mt-2">⚡ 根据镜头描述自动搜索 Pexels 真实视频素材</p>
+                  )}
+                </div>
+
+                {/* Transition selector */}
+                <div className="mb-4">
+                  <label className="text-xs font-medium text-muted-foreground mb-2 block">镜头转场效果</label>
+                  <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5">
+                    {[
+                      { value: "fade", label: "渐变" },
+                      { value: "fadeblack", label: "黑场" },
+                      { value: "fadewhite", label: "白场" },
+                      { value: "slideleft", label: "左滑" },
+                      { value: "slideright", label: "右滑" },
+                      { value: "wipeleft", label: "左擦" },
+                      { value: "wiperight", label: "右擦" },
+                      { value: "dissolve", label: "溶解" },
+                      { value: "circleopen", label: "圆开" },
+                      { value: "none", label: "无" },
+                    ].map((t) => (
+                      <button
+                        key={t.value}
+                        onClick={() => setTransition(t.value)}
+                        className={`px-2 py-2 rounded-md border text-xs font-medium transition-all ${
+                          transition === t.value
+                            ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-400"
+                            : "border-border/50 bg-card/30 text-muted-foreground hover:border-border"
+                        }`}
+                      >
+                        {t.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Transition duration slider */}
+                {transition !== "none" && (
+                  <div className="mb-4">
+                    <label className="text-xs font-medium text-muted-foreground mb-2 flex justify-between">
+                      <span>转场时长</span>
+                      <span className="text-emerald-400">{transitionDuration.toFixed(1)}s</span>
+                    </label>
+                    <input
+                      type="range"
+                      min="0.3"
+                      max="2"
+                      step="0.1"
+                      value={transitionDuration}
+                      onChange={(e) => setTransitionDuration(parseFloat(e.target.value))}
+                      className="w-full h-1.5 bg-zinc-700 rounded-full appearance-none cursor-pointer accent-emerald-500"
+                    />
+                    <div className="flex justify-between text-[10px] text-muted-foreground mt-1">
+                      <span>0.3s 快</span>
+                      <span>2s 慢</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Episode status */}
                 <div className="space-y-2 mb-4 sm:mb-6">
                   {episodes.map((ep) => (
                     <div key={ep.id} className="flex items-center gap-2 sm:gap-3 text-xs sm:text-sm">
@@ -865,7 +964,7 @@ export default function PreviewPageContent() {
                   ) : (
                     <>
                       <Film className="h-4 w-4 mr-2" />
-                      合成所有集
+                      {materialSource === "pexels" ? "合成（真实视频）" : "合成所有集"}
                     </>
                   )}
                 </Button>
