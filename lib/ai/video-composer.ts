@@ -22,6 +22,156 @@ export interface ComposeOptions {
   fadeDuration?: number; // seconds
 }
 
+// ============ Transition types for xfade ============
+
+export type TransitionType =
+  | "fade"
+  | "fadeblack"
+  | "fadewhite"
+  | "slideleft"
+  | "slideright"
+  | "wipeleft"
+  | "wiperight"
+  | "dissolve"
+  | "pixelize"
+  | "circleopen"
+  | "circleclose"
+  | "radial"
+  | "smoothleft"
+  | "smoothright"
+  | "none";
+
+const XFADE_MAP: Record<TransitionType, string> = {
+  fade: "fade",
+  fadeblack: "fadeblack",
+  fadewhite: "fadewhite",
+  slideleft: "slideleft",
+  slideright: "slideright",
+  wipeleft: "wipewipeleft",
+  wiperight: "wiperight",
+  dissolve: "dissolve",
+  pixelize: "pixelize",
+  circleopen: "circleopen",
+  circleclose: "circleclose",
+  radial: "radial",
+  smoothleft: "smoothleft",
+  smoothright: "smoothright",
+  none: "none",
+};
+
+/**
+ * Get the actual duration of a video file using ffprobe.
+ */
+async function getClipDuration(filePath: string): Promise<number> {
+  try {
+    const { stdout } = await execAsync(
+      `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${filePath}"`
+    );
+    return parseFloat(stdout.trim()) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Concatenate video clips with xfade transitions.
+ * Processes clips pair by pair to build the final output.
+ */
+async function concatWithXfade(
+  clipPaths: string[],
+  outputPath: string,
+  transition: TransitionType = "fade",
+  transitionDuration: number = 0.5,
+  tempDir: string
+): Promise<string> {
+  if (clipPaths.length === 0) throw new Error("No clips to concat");
+  if (clipPaths.length === 1) {
+    await fs.copyFile(clipPaths[0], outputPath);
+    return outputPath;
+  }
+
+  if (transition === "none") {
+    // Fallback to simple concat without transitions
+    const concatListPath = path.join(tempDir, "concat-list.txt");
+    const concatContent = clipPaths.map((p) => `file '${p}'`).join("\n");
+    await fs.writeFile(concatListPath, concatContent);
+    const cmd = `ffmpeg -f concat -safe 1 -i "${concatListPath}" -c copy -y "${outputPath}"`;
+    await execAsync(cmd, { timeout: 300000 });
+    return outputPath;
+  }
+
+  const xfadeName = XFADE_MAP[transition] || "fade";
+  const td = Math.max(0.3, Math.min(transitionDuration, 2)); // clamp 0.3-2s
+
+  // Normalize all clips to uniform encoding first (h264, aac 44100 stereo)
+  const normPaths: string[] = [];
+  for (let i = 0; i < clipPaths.length; i++) {
+    const normPath = path.join(tempDir, `norm-${i}.mp4`);
+    const cmd = `ffmpeg -i "${clipPaths[i]}" -c:v libx264 -crf 18 -preset fast -pix_fmt yuv420p -r 30 -c:a aac -ar 44100 -ac 2 -b:a 128k -y "${normPath}"`;
+    await execAsync(cmd, { timeout: 180000 });
+    normPaths.push(normPath);
+  }
+
+  // Pair-wise xfade merge
+  let currentPaths = normPaths;
+  let pass = 0;
+
+  while (currentPaths.length > 1) {
+    pass++;
+    const nextPaths: string[] = [];
+
+    for (let i = 0; i < currentPaths.length; i += 2) {
+      if (i + 1 >= currentPaths.length) {
+        // Odd clip out, carry forward
+        nextPaths.push(currentPaths[i]);
+        continue;
+      }
+
+      const clipA = currentPaths[i];
+      const clipB = currentPaths[i + 1];
+      const durationA = await getClipDuration(clipA);
+
+      if (durationA <= td) {
+ log.warn(`Clip A too short (${durationA.toFixed(1)}s) for xfade (${td}s), concatenating without transition`);
+        const simpleOut = path.join(tempDir, `merge-pass${pass}-${nextPaths.length}.mp4`);
+        const concatListPath = path.join(tempDir, `concat-pass${pass}-${nextPaths.length}.txt`);
+        await fs.writeFile(concatListPath, `file '${clipA}'\nfile '${clipB}'`);
+        await execAsync(`ffmpeg -f concat -safe 1 -i "${concatListPath}" -c copy -y "${simpleOut}"`, { timeout: 180000 });
+        nextPaths.push(simpleOut);
+        continue;
+      }
+
+      const offset = durationA - td;
+      const mergeOut = path.join(tempDir, `merge-pass${pass}-${nextPaths.length}.mp4`);
+
+      // Video: xfade, Audio: acrossfade
+      const cmd = `ffmpeg -i "${clipA}" -i "${clipB}" ` +
+        `-filter_complex ` +
+        `"[0:v][1:v]xfade=transition=${xfadeName}:duration=${td}:offset=${offset}[v];` +
+        `[0:a][1:a]acrossfade=d=${td}:c1=tri:c2=tri[aout]" ` +
+        `-map "[v]" -map "[aout]" ` +
+        `-c:v libx264 -crf 18 -preset fast -pix_fmt yuv420p ` +
+        `-c:a aac -ar 44100 -ac 2 -b:a 128k ` +
+        `-y "${mergeOut}"`;
+
+      await execAsync(cmd, { timeout: 300000 }).catch(async (err) => {
+        log.warn(`xfade failed, falling back to simple concat: ${err instanceof Error ? err.message : err}`);
+        const concatListPath = path.join(tempDir, `concat-fallback-${nextPaths.length}.txt`);
+        await fs.writeFile(concatListPath, `file '${clipA}'\nfile '${clipB}'`);
+        await execAsync(`ffmpeg -f concat -safe 1 -i "${concatListPath}" -c copy -y "${mergeOut}"`, { timeout: 180000 });
+      });
+
+      nextPaths.push(mergeOut);
+    }
+
+    currentPaths = nextPaths;
+  }
+
+  // Move final result to outputPath
+  await fs.rename(currentPaths[0], outputPath);
+  return outputPath;
+}
+
 // ============ Legacy: single-image + audio composition ============
 
 export async function composeVideo(options: ComposeOptions): Promise<string> {
@@ -302,6 +452,8 @@ export async function composeEpisodeFromShots(
     bgmPath?: string | null; // BGM file path to mix into final video
     bgmVolume?: number; // BGM volume (0-1), default 0.15
     outputPath?: string; // explicit output path; computed from UPLOAD_DIR if omitted
+    transition?: TransitionType; // transition type between shots, default "fade"
+    transitionDuration?: number; // transition duration in seconds, default 0.5
   }
 ): Promise<string> {
   const uploadDir = path.resolve(process.env.UPLOAD_DIR || "./uploads");
@@ -350,13 +502,24 @@ export async function composeEpisodeFromShots(
     ? outputPath
     : path.join(episodeDir, `episode-${episodeNumber}-raw.mp4`);
 
+  const transition = options?.transition || "fade";
+  const transitionDuration = options?.transitionDuration || 0.5;
+
   if (shotVideoPaths.length === 1) {
     // Just rename/copy the single file
     await fs.copyFile(shotVideoPaths[0], rawOutputPath);
+  } else if (transition !== "none") {
+    // Use xfade transitions between shots
+    log.info(`Concatenating ${shotVideoPaths.length} clips with ${transition} transition (${transitionDuration}s)`);
+    await concatWithXfade(
+      shotVideoPaths,
+      rawOutputPath,
+      transition,
+      transitionDuration,
+      tempDir
+    );
   } else {
-    // Normalize each shot to TS with uniform audio params, then concat via concat protocol
-    // This avoids AAC incompatibility issues when audio sources have different
-    // sample rates or channel layouts (e.g. 44100Hz stereo vs 16000Hz mono)
+    // No transition — use original TS concat protocol
     const tsPaths: string[] = [];
     for (const shotPath of shotVideoPaths) {
       const tsPath = path.join(tempDir, `${path.basename(shotPath, '.mp4')}.ts`);
