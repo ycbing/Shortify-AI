@@ -31,6 +31,9 @@ export async function generateVoiceover(
   rate: string = "+0%",
   pitch: string = "+0Hz"
 ): Promise<VoiceoverResult> {
+  if (!text) {
+    throw new Error("generateVoiceover: text is empty");
+  }
   const dir = path.dirname(outputPath);
   await fs.mkdir(dir, { recursive: true });
 

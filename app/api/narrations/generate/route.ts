@@ -11,8 +11,6 @@ import { createLogger } from "@/lib/logger";
 import type { TransitionType } from "@/lib/ai/video-composer";
 
 const log = createLogger("narrations-generate");
-
-// Cost: 1 credit per narration
 const NARRATION_CREDIT_COST = 5;
 
 export async function POST(request: NextRequest) {
@@ -29,7 +27,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "缺少 narrationId" }, { status: 400 });
     }
 
-    // Fetch narration
     const [narration] = await db
       .select()
       .from(narrations)
@@ -57,50 +54,53 @@ export async function POST(request: NextRequest) {
       .set({ status: "generating", updatedAt: new Date() })
       .where(eq(narrations.id, narrationId));
 
-    // Step 1: Generate script
-    if (!narration.videoScript) {
-      const { script, terms } = await generateNarrationScript(narration.subject || narration.title, {
+    // === Step 1: Generate script (if needed) ===
+    let videoScript = narration.videoScript || "";
+    let searchTerms = (narration.searchTerms as string[]) || [];
+
+    if (!videoScript) {
+      const result = await generateNarrationScript(narration.subject || narration.title, {
         language: narration.language || undefined,
         paragraphNumber: narration.paragraphNumber || 5,
       });
 
+      videoScript = result.script;
+      searchTerms = result.terms;
+
       await db
         .update(narrations)
-        .set({
-          videoScript: script,
-          searchTerms: terms,
-          updatedAt: new Date(),
-        })
+        .set({ videoScript, searchTerms, updatedAt: new Date() })
         .where(eq(narrations.id, narrationId));
 
       if (stopAt === "script") {
         await db
           .update(narrations)
-          .set({ status: "script_ready" })
+          .set({ status: "script_ready", updatedAt: new Date() })
           .where(eq(narrations.id, narrationId));
 
         return NextResponse.json({
           narrationId,
-          script,
-          terms,
+          script: videoScript,
+          terms: searchTerms,
           message: "解说文案生成完成",
         });
       }
     } else if (stopAt === "script") {
       return NextResponse.json({
         narrationId,
-        script: narration.videoScript,
-        terms: narration.searchTerms,
+        script: videoScript,
+        terms: searchTerms,
         message: "文案已存在",
       });
     }
 
-    // Step 2: Compose video (background)
+    // === Step 2: Compose video (background) ===
+    // Use the variable we just fetched/set, NOT narration.videoScript (stale)
     composeNarrationVideo({
       narrationId,
       userId: session.user.id,
-      script: narration.videoScript!,
-      searchTerms: (narration.searchTerms as string[]) || [],
+      script: videoScript,
+      searchTerms,
       voiceName: narration.voiceName || "zh-CN-YunyangNeural",
       voiceRate: narration.voiceRate || 1,
       videoAspect: (narration.videoAspect as "portrait" | "landscape") || "landscape",
@@ -112,7 +112,6 @@ export async function POST(request: NextRequest) {
       bgmUrl: narration.bgmUrl,
     })
       .then(async (result) => {
-        // Upload to COS
         let finalVideoUrl = result.videoUrl;
         try {
           const uploadDir = process.env.UPLOAD_DIR || "./uploads";
@@ -134,7 +133,6 @@ export async function POST(request: NextRequest) {
           `短视频解说 - ${narration.title}`
         ).catch(() => {});
 
-        // Update DB
         await db
           .update(narrations)
           .set({
@@ -155,10 +153,7 @@ export async function POST(request: NextRequest) {
         });
         await db
           .update(narrations)
-          .set({
-            status: "error",
-            updatedAt: new Date(),
-          })
+          .set({ status: "error", updatedAt: new Date() })
           .where(eq(narrations.id, narrationId));
       });
 
