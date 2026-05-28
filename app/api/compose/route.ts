@@ -4,6 +4,8 @@ import { db } from "@/lib/db";
 import { dramas, episodes, type Episode } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { composeVideo, composeEpisodeFromShots, mergeVideos } from "@/lib/ai/video-composer";
+import { searchAndDownloadVideos, extractSearchTermsFromShots } from "@/lib/ai/pexels-material";
+import type { TransitionType } from "@/lib/ai/video-composer";
 import { generateSubtitles, generateSubtitlesWithASR } from "@/lib/ai/subtitle-generator";
 import { isAsrConfigured } from "@/lib/ai/asr-client";
 import { uploadFileToCos, videoCosKey } from "@/lib/ai/cos-storage";
@@ -54,7 +56,7 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json();
     dramaId = body.dramaId;
-    const { episodeId, useAsr } = body;
+    const { episodeId, useAsr, materialSource, transition, transitionDuration } = body;
 
     if (!dramaId) {
       return NextResponse.json({ error: "缺少 dramaId" }, { status: 400 });
@@ -187,6 +189,8 @@ export async function POST(request: NextRequest) {
             shotVideos,
             bgmPath,
             bgmVolume,
+            transition: (transition as TransitionType) || 'fade',
+            transitionDuration: transitionDuration || 0.5,
           }
         );
 
@@ -275,6 +279,9 @@ export async function POST(request: NextRequest) {
       dramaBgmUrl: drama.bgmUrl,
       dramaGenre: drama.genre,
       allEpisodes,
+      materialSource,
+      transition,
+      transitionDuration,
     }).catch(err => log.error("Background compose generation failed", { error: err instanceof Error ? err.message : String(err) }));
 
     return NextResponse.json({
@@ -307,6 +314,9 @@ type ComposeGenerationParams = {
   dramaBgmUrl: string | null;
   dramaGenre: string | null;
   allEpisodes: Episode[];
+  materialSource?: string;
+  transition?: string;
+  transitionDuration?: number;
 };
 
 async function processComposeGeneration({
@@ -318,6 +328,9 @@ async function processComposeGeneration({
   dramaBgmUrl,
   dramaGenre,
   allEpisodes,
+  materialSource,
+  transition,
+  transitionDuration,
 }: ComposeGenerationParams) {
   try {
     const videoPaths: string[] = [];
@@ -421,6 +434,34 @@ async function processComposeGeneration({
             currentEpisode: episode.episodeNumber,
             stage: "compose",
           });
+
+          // Optionally fetch Pexels video materials if source is 'pexels'
+          if (materialSource === 'pexels') {
+            try {
+              await touchGenerationTaskHeartbeat(taskId, {
+                currentEpisode: episode.episodeNumber,
+                stage: "pexels",
+              });
+              const terms = extractSearchTermsFromShots(shots);
+              const totalDuration = shots.reduce((s, sh) => s + (sh.duration || 5), 0);
+              const pexelsVideos = await searchAndDownloadVideos(
+                terms,
+                'landscape',
+                totalDuration,
+                uploadDir,
+                10
+              );
+              for (let i = 0; i < shots.length && i < pexelsVideos.length; i++) {
+                shotVideos.set(shots[i].shotNumber, pexelsVideos[i]);
+              }
+              log.info(`Loaded ${pexelsVideos.length} Pexels videos for episode ${episode.episodeNumber}`);
+            } catch (err) {
+              log.warn(`Pexels material fetch failed, using AI images as fallback`, {
+                error: err instanceof Error ? err.message : err,
+              });
+            }
+          }
+
           await composeEpisodeFromShots(
             shots,
             shotAudios,
@@ -433,6 +474,8 @@ async function processComposeGeneration({
               shotVideos,
               bgmPath: resolvedBgmPath,
               bgmVolume: dramaBgmVolume,
+              transition: (transition as TransitionType) || 'fade',
+              transitionDuration: transitionDuration || 0.5,
             }
           );
         } else if (episode.imageUrl && episode.voiceoverUrl) {
