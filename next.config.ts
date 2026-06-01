@@ -1,7 +1,6 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  output: "standalone",
   serverExternalPackages: ["bcryptjs"],
   allowedDevOrigins: [],
   images: {
@@ -12,6 +11,7 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  outputFileTracingRoot: "/root/.openclaw/workspace/projects/shortify-ai",
 };
 
 export default nextConfig;
