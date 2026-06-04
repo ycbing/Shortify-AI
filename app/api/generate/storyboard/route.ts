@@ -483,6 +483,42 @@ async function processStoryboardGeneration({
 
 // ============ V2: Shot-level storyboard ============
 
+/**
+ * 为缺少参考图的角色自动生成标准参考图（正面半身照）
+ * 在第一个镜头生图前调用，确保后续镜头都有参考图可用
+ */
+async function autoGenerateMissingReferences(
+  characters: Character[],
+  refMap: Map<string, string>,
+  style: string,
+  dramaId: string
+): Promise<void> {
+  const missingChars = characters.filter((c) => c.appearance && !refMap.has(c.name));
+  for (const char of missingChars) {
+    try {
+      const appearance = char.appearance || char.description || "";
+      const refPrompt = `${char.name}正面半身肖像，${appearance}，白色纯色背景，摄影棚均匀打光，高清摄影，面部五官清晰，自然表情，看向前方，肖像摄影`;
+      log.info(`自动生成角色参考图: ${char.name}`);
+      const imageUrl = await generateImage(refPrompt, style, "1024x1024");
+      refMap.set(char.name, imageUrl);
+      // 同步更新 drama.characters
+      const drama = await db.select({ characters: dramas.characters }).from(dramas).where(eq(dramas.id, dramaId)).limit(1);
+      if (drama[0]?.characters) {
+        const chars: Character[] = Array.isArray(drama[0].characters) ? drama[0].characters : [];
+        const idx = chars.findIndex((c) => c.name === char.name);
+        if (idx >= 0) {
+          chars[idx] = { ...chars[idx], referenceImageUrl: imageUrl };
+          await db.update(dramas).set({ characters: chars as any }).where(eq(dramas.id, dramaId));
+        }
+      }
+    } catch (err) {
+      log.warn(`自动生成角色参考图失败: ${char.name}`, {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+}
+
 async function handleShotStoryboard(
   episode: { id: string; episodeNumber: number; shotData: unknown },
   style: string | null,
@@ -494,6 +530,11 @@ async function handleShotStoryboard(
 ): Promise<{ episodeNumber: number; imageUrl: string; shotImages: { shotNumber: number; imageUrl: string }[] }> {
   const shots = episode.shotData as unknown as Shot[];
   const shotImages: { shotNumber: number; imageUrl: string }[] = [];
+
+  // 自动为缺少参考图的角色生成参考图（只在第一集触发）
+  if (episode.episodeNumber === 1) {
+    await autoGenerateMissingReferences(characters, refMap, style || "realistic", dramaId);
+  }
 
   for (let i = 0; i < shots.length; i++) {
     const shot = shots[i];

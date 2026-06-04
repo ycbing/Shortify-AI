@@ -14,9 +14,18 @@ import {
   Plus,
   Clock,
   Sparkles,
+  Settings,
+  Cpu,
 } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
+import dynamic from "next/dynamic";
+
+// 动态导入模型配置组件（避免服务端渲染问题）
+const ModelConfigSettings = dynamic(
+  () => import("@/components/settings/model-config-settings"),
+  { ssr: false, loading: () => <div className="flex items-center justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-emerald-400" /></div> }
+);
 
 interface UsageLog {
   id: string;
@@ -53,6 +62,7 @@ export default function SettingsPage() {
   const router = useRouter();
   const [creditInfo, setCreditInfo] = useState<CreditInfo | null>(null);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<"credits" | "model">("credits");
 
   const fetchCredits = useCallback(async () => {
     try {
@@ -111,137 +121,184 @@ export default function SettingsPage() {
       </header>
 
       <main className="mx-auto max-w-3xl px-4 py-6 sm:py-8 space-y-6">
-        {/* Credits balance card */}
-        <Card className="border-border/50 bg-card/50">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Coins className="h-5 w-5 text-emerald-400" />
-              我的积分
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-3xl font-bold text-emerald-400">{balance}</p>
-                <p className="text-xs text-muted-foreground mt-1">剩余积分</p>
-              </div>
-              <Button
-                onClick={() =>
-                  toast.info("充值功能即将上线，敬请期待！🎉", {
-                    duration: 3000,
-                  })
-                }
-                className="bg-emerald-600 hover:bg-emerald-500 min-h-[44px]"
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                充值积分
-              </Button>
-            </div>
+        {/* Tab 切换 */}
+        <div className="flex gap-1 p-1 rounded-lg bg-muted/50">
+          <button
+            onClick={() => setActiveTab("credits")}
+            className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition ${
+              activeTab === "credits"
+                ? "bg-emerald-600 text-white shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <span className="flex items-center justify-center gap-2">
+              <Coins className="h-4 w-4" />
+              积分与账户
+            </span>
+          </button>
+          <button
+            onClick={() => setActiveTab("model")}
+            className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition ${
+              activeTab === "model"
+                ? "bg-emerald-600 text-white shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <span className="flex items-center justify-center gap-2">
+              <Cpu className="h-4 w-4" />
+              模型服务
+            </span>
+          </button>
+        </div>
 
-            {balance < 20 && (
-              <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-400">
-                ⚠️ 积分不足，建议及时充值以免影响创作
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Credit costs reference */}
-        <Card className="border-border/50 bg-card/50">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Sparkles className="h-5 w-5 text-emerald-400" />
-              积分消耗说明
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {COST_DISPLAY.map((item) => (
-                <div
-                  key={item.type}
-                  className="flex items-center justify-between py-2 px-3 rounded-lg bg-muted/30"
-                >
-                  <div className="flex items-center gap-2 text-sm">
-                    <span>{item.icon}</span>
-                    <span>{item.type}</span>
+        {activeTab === "credits" ? (
+          <>
+            {/* Credits balance card */}
+            <Card className="border-border/50 bg-card/50">
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Coins className="h-5 w-5 text-emerald-400" />
+                  我的积分
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-3xl font-bold text-emerald-400">{balance}</p>
+                    <p className="text-xs text-muted-foreground mt-1">剩余积分</p>
                   </div>
-                  <Badge variant="outline" className="text-emerald-400 border-emerald-500/30">
-                    {item.cost} 积分
-                  </Badge>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Usage history */}
-        <Card className="border-border/50 bg-card/50">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Clock className="h-5 w-5 text-emerald-400" />
-              使用记录
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {logs.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground text-sm">
-                <p>暂无使用记录</p>
-                <p className="text-xs mt-1">开始创作短剧后，使用记录会显示在这里</p>
-              </div>
-            ) : (
-              <div className="space-y-1">
-                {logs.map((log) => (
-                  <div
-                    key={log.id}
-                    className="flex items-center justify-between py-2.5 px-3 rounded-lg hover:bg-muted/30 transition"
+                  <Button
+                    onClick={() =>
+                      toast.info("充值功能即将上线，敬请期待！🎉", {
+                        duration: 3000,
+                      })
+                    }
+                    className="bg-emerald-600 hover:bg-emerald-500 min-h-[44px]"
                   >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <span className="text-sm shrink-0">
-                        {TYPE_LABELS[log.type] || log.type}
-                      </span>
-                      {log.description && (
-                        <span className="text-xs text-muted-foreground truncate hidden sm:inline">
-                          {log.description}
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-3 shrink-0">
-                      <span className="text-sm text-red-400">
-                        -{log.creditsUsed}
-                      </span>
-                      <span className="text-xs text-muted-foreground hidden sm:inline w-28 text-right">
-                        {new Date(log.createdAt).toLocaleString("zh-CN", {
-                          month: "short",
-                          day: "numeric",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+                    <Plus className="h-4 w-4 mr-2" />
+                    充值积分
+                  </Button>
+                </div>
 
-        {/* Account info */}
-        <Card className="border-border/50 bg-card/50">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">账户信息</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3 text-sm">
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">邮箱</span>
-              <span>{session?.user?.email || "-"}</span>
-            </div>
-            <Separator className="bg-border/50" />
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">注册时间</span>
-              <span>-</span>
-            </div>
-          </CardContent>
-        </Card>
+                {balance < 20 && (
+                  <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-400">
+                    ⚠️ 积分不足，建议及时充值以免影响创作
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Credit costs reference */}
+            <Card className="border-border/50 bg-card/50">
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Sparkles className="h-5 w-5 text-emerald-400" />
+                  积分消耗说明
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {COST_DISPLAY.map((item) => (
+                    <div
+                      key={item.type}
+                      className="flex items-center justify-between py-2 px-3 rounded-lg bg-muted/30"
+                    >
+                      <div className="flex items-center gap-2 text-sm">
+                        <span>{item.icon}</span>
+                        <span>{item.type}</span>
+                      </div>
+                      <Badge variant="outline" className="text-emerald-400 border-emerald-500/30">
+                        {item.cost} 积分
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Usage history */}
+            <Card className="border-border/50 bg-card/50">
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Clock className="h-5 w-5 text-emerald-400" />
+                  使用记录
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {logs.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground text-sm">
+                    <p>暂无使用记录</p>
+                    <p className="text-xs mt-1">开始创作短剧后，使用记录会显示在这里</p>
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    {logs.map((log) => (
+                      <div
+                        key={log.id}
+                        className="flex items-center justify-between py-2.5 px-3 rounded-lg hover:bg-muted/30 transition"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span className="text-sm shrink-0">
+                            {TYPE_LABELS[log.type] || log.type}
+                          </span>
+                          {log.description && (
+                            <span className="text-xs text-muted-foreground truncate hidden sm:inline">
+                              {log.description}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-3 shrink-0">
+                          <span className="text-sm text-red-400">
+                            -{log.creditsUsed}
+                          </span>
+                          <span className="text-xs text-muted-foreground hidden sm:inline w-28 text-right">
+                            {new Date(log.createdAt).toLocaleString("zh-CN", {
+                              month: "short",
+                              day: "numeric",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Account info */}
+            <Card className="border-border/50 bg-card/50">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">账户信息</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">邮箱</span>
+                  <span>{session?.user?.email || "-"}</span>
+                </div>
+                <Separator className="bg-border/50" />
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">注册时间</span>
+                  <span>-</span>
+                </div>
+              </CardContent>
+            </Card>
+          </>
+        ) : (
+          /* 模型服务配置 */
+          <Card className="border-border/50 bg-card/50">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Cpu className="h-5 w-5 text-emerald-400" />
+                模型服务配置
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ModelConfigSettings />
+            </CardContent>
+          </Card>
+        )}
       </main>
     </div>
   );

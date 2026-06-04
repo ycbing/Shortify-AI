@@ -5,11 +5,13 @@ import { generateImageWithKling } from "./kling-client";
 import type { KlingCharacterReference } from "./kling-client";
 import { generateImageWithLibLib, isLibLibConfigured } from "./liblib-client";
 import type { LibLibCharacterReference } from "./liblib-client";
+import { resolveConfig } from "@/lib/ai/model-resolver";
 
 const log = createLogger("image-generator");
-const COGVIEW_BASE_URL =
+// 环境变量回退
+const ENV_COGVIEW_BASE_URL =
   process.env.GLM_BASE_URL || "https://open.bigmodel.cn/api/paas/v4";
-const GLM_API_KEY = process.env.GLM_API_KEY || "";
+const ENV_GLM_API_KEY = process.env.GLM_API_KEY || "";
 
 type ImageSize = "1024x1024" | "1280x720" | "1728x960";
 
@@ -19,6 +21,7 @@ export interface GenerateImageOptions {
     type: "face" | "full_body";
     characterName: string;
   }[];
+  userId?: string; // 用于解析用户自定义配置
 }
 
 interface CogViewResponse {
@@ -32,12 +35,22 @@ interface CogViewResponse {
 async function generateImageWithCogView(
   prompt: string,
   style: string = "realistic",
-  size: ImageSize = "1728x960"
+  size: ImageSize = "1728x960",
+  userId?: string
 ): Promise<string> {
+  // 尝试从模型配置解析
+  const modelConfig = await resolveConfig(userId || null, "image").catch(() => null);
+  const baseUrl = modelConfig?.baseUrl || ENV_COGVIEW_BASE_URL;
+  const apiKey = modelConfig?.apiKey || ENV_GLM_API_KEY;
+
+  if (!apiKey) {
+    throw new Error("图片生成 API Key 未配置：请在设置中配置模型服务或设置 GLM_API_KEY 环境变量");
+  }
+
   const stylePrompt = getStyleImagePrompt(style as "realistic" | "anime" | "ink" | "cyberpunk");
   const fullPrompt = `${prompt}。画面风格：${stylePrompt}。宽屏16:9构图，电影感画面，专业摄影级别。`;
 
-  const model = process.env.IMAGE_MODEL || "glm-image";
+  const model = modelConfig?.modelName || process.env.IMAGE_MODEL || "glm-image";
 
   const imageSize = model.includes("glm-image") ? "1728x960" : size;
 
@@ -65,11 +78,11 @@ async function generateImageWithCogView(
     try {
       const response = await withRetry(
         () =>
-          fetch(`${COGVIEW_BASE_URL}/images/generations`, {
+          fetch(`${baseUrl}/images/generations`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              Authorization: `Bearer ${GLM_API_KEY}`,
+              Authorization: `Bearer ${apiKey}`,
             },
             body: JSON.stringify({
               model,
@@ -186,7 +199,7 @@ export async function generateImage(
     return generateImageWithKling(prompt, size);
   }
 
-  return generateImageWithCogView(prompt, style, size);
+  return generateImageWithCogView(prompt, style, size, options?.userId);
 }
 
 export async function downloadImage(

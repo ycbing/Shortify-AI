@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { StepIndicator } from "@/components/create/step-indicator";
 import { ScriptEditor } from "@/components/drama/script-editor";
+import { CharacterRefPanel } from "@/components/drama/character-ref-panel";
 import { Loader2, ArrowRight, ArrowLeft, Sparkles, Users, Film, Square, Save, AlertCircle } from "lucide-react";
 import type { GeneratedEpisode, GeneratedScriptV2, Shot, Character } from "@/types/drama";
 import { isScriptV2, VOICE_OPTIONS } from "@/types/drama";
@@ -449,6 +450,20 @@ export default function ScriptPageContent() {
                   ))}
                 </div>
               </section>
+
+              {/* 角色参考图管理面板 */}
+              {characters.length > 0 && dramaId && (
+                <CharacterRefPanel
+                  dramaId={dramaId}
+                  characters={characters}
+                  onCharactersUpdate={(updated) => {
+                    setCharacters(updated);
+                    if (scriptV2) {
+                      setScriptV2({ ...scriptV2, characters: updated });
+                    }
+                  }}
+                />
+              )}
 
               {/* Episode Shots Timeline */}
               {scriptV2.episodes.map((episode) => (

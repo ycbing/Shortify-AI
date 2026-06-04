@@ -5,12 +5,14 @@ import { generateVideoWithKling as generateVideoWithLibLibKling, isLibLibConfigu
 import path from "path";
 import fs from "fs/promises";
 import { createLogger } from "@/lib/logger";
+import { resolveConfig } from "@/lib/ai/model-resolver";
 
 const log = createLogger("video-generator");
 
-const COGVIDEO_BASE_URL =
+// 环境变量回退
+const ENV_COGVIDEO_BASE_URL =
   process.env.GLM_BASE_URL || "https://open.bigmodel.cn/api/paas/v4";
-const GLM_API_KEY = process.env.GLM_API_KEY || "";
+const ENV_GLM_API_KEY = process.env.GLM_API_KEY || "";
 
 interface CogVideoSubmitResponse {
   model: string;
@@ -57,6 +59,7 @@ export interface GenerateVideoOptions {
   characterReference?: KlingCharacterReference;
   quality?: "quality" | "speed";
   size?: string;
+  userId?: string;
 }
 
 /**
@@ -122,7 +125,7 @@ export async function submitVideoGeneration(
   prompt: string,
   imageUrl?: string,
   style: string = "realistic",
-  options?: VideoGenerationOptions
+  options?: VideoGenerationOptions & { userId?: string }
 ): Promise<{ taskId: string }> {
   const {
     quality = "quality",
@@ -132,7 +135,23 @@ export async function submitVideoGeneration(
     withAudio,
     maxRetries = 3,
     retryBaseMs = 2000,
+    userId,
   } = options || {};
+
+  // 尝试从模型配置解析
+  const modelConfig = await resolveConfig(userId || null, "video").catch(() => null);
+  const baseUrl = modelConfig?.baseUrl || ENV_COGVIDEO_BASE_URL;
+  const apiKey = modelConfig?.apiKey || ENV_GLM_API_KEY;
+
+  if (!apiKey) {
+    throw new Error("视频生成 API Key 未配置：请在设置中配置模型服务或设置 GLM_API_KEY 环境变量");
+  }
+
+  // 从配置或环境变量获取视频参数
+  const resolvedQuality = (modelConfig?.config?.quality as string) || quality;
+  const resolvedSize = (modelConfig?.config?.size as string) || size;
+  const resolvedFps = fps ?? (modelConfig?.config?.fps as number) ?? 30;
+  const resolvedDuration = duration ?? (modelConfig?.config?.duration as number) ?? 5;
 
   const stylePrompt = getStyleImagePrompt(style as "realistic" | "anime" | "ink" | "cyberpunk");
   const fullPrompt = imageUrl
@@ -140,10 +159,10 @@ export async function submitVideoGeneration(
     : `${prompt}。画面风格：${stylePrompt}。宽屏16:9构图，电影感画面。`;
 
   const body: Record<string, unknown> = {
-    model: process.env.VIDEO_MODEL || "cogvideox-3",
+    model: modelConfig?.modelName || process.env.VIDEO_MODEL || "cogvideox-3",
     prompt: fullPrompt,
-    quality,
-    size,
+    quality: resolvedQuality,
+    size: resolvedSize,
   };
 
   if (imageUrl) {
@@ -151,8 +170,8 @@ export async function submitVideoGeneration(
   }
 
   // 可选参数（仅在有值时发送）
-  if (fps !== undefined) body.fps = fps;
-  if (duration !== undefined) body.duration = duration;
+  if (resolvedFps !== undefined) body.fps = resolvedFps;
+  if (resolvedDuration !== undefined) body.duration = resolvedDuration;
   if (withAudio !== undefined) body.with_audio = withAudio;
 
   // 带重试的请求（429 限流 + 余额不足检测）
@@ -160,11 +179,11 @@ export async function submitVideoGeneration(
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      const response = await fetch(`${COGVIDEO_BASE_URL}/videos/generations`, {
+      const response = await fetch(`${baseUrl}/videos/generations`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${GLM_API_KEY}`,
+          Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify(body),
       });
@@ -221,17 +240,22 @@ export async function submitVideoGeneration(
  * 智谱 API: GET /async-result/{id}
  */
 export async function getVideoTaskStatus(
-  taskId: string
+  taskId: string,
+  apiKeyOverride?: string,
+  baseUrlOverride?: string
 ): Promise<{
   status: string;
   videoUrl?: string;
   coverUrl?: string;
 }> {
+  const baseUrl = baseUrlOverride || ENV_COGVIDEO_BASE_URL;
+  const apiKey = apiKeyOverride || ENV_GLM_API_KEY;
+
   const response = await fetch(
-    `${COGVIDEO_BASE_URL}/async-result/${taskId}`,
+    `${baseUrl}/async-result/${taskId}`,
     {
       headers: {
-        Authorization: `Bearer ${GLM_API_KEY}`,
+        Authorization: `Bearer ${apiKey}`,
       },
     }
   );
