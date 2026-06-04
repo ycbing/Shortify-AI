@@ -158,9 +158,7 @@ export async function generateImage(
   const klingConfigured = process.env.KLING_ACCESS_KEY && process.env.KLING_SECRET_KEY;
   const provider = process.env.IMAGE_PROVIDER || "cogview";
   const hasRefs = options?.characterReferences && options.characterReferences.length > 0;
-
-  // LibLib (preferred when configured - cheaper, more models)
-  const liblibConfigured = isLibLibConfigured();
+  const liblibConfigured = process.env.ENABLE_LIBLIB !== "false" && isLibLibConfigured();
   if (liblibConfigured) {
     if (hasRefs) {
       const primaryRef = options!.characterReferences![0];

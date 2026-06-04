@@ -23,6 +23,7 @@ async function verifyPassword(
     if (!rows.length) return null;
 
     const isValid = await bcrypt.compare(password, rows[0].passwordHash);
+    log.info('Password check', { email, isValid, hashLen: rows[0].passwordHash.length });
     if (!isValid) return null;
 
     return { id: rows[0].userId, email: rows[0].email };
@@ -41,6 +42,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         password: { label: "密码", type: "password" },
       },
       async authorize(credentials) {
+        log.info("Login attempt", { email: credentials?.email, hasPassword: !!credentials?.password });
         if (!credentials?.email || !credentials?.password) {
           return null;
         }
