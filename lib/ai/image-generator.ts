@@ -1,5 +1,5 @@
 import { getStyleImagePrompt } from "./script-generator";
-import { withRetry } from "@/lib/resilience";
+import { withRetry, withTimeout } from "@/lib/resilience";
 import { createLogger } from "@/lib/logger";
 import { generateImageWithKling } from "./kling-client";
 import type { KlingCharacterReference } from "./kling-client";
@@ -78,18 +78,23 @@ async function generateImageWithCogView(
     try {
       const response = await withRetry(
         () =>
-          fetch(`${baseUrl}/images/generations`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${apiKey}`,
-            },
-            body: JSON.stringify({
-              model,
-              prompt: attemptPrompt,
-              size: imageSize,
-            }),
-          }),
+          withTimeout(
+            () =>
+              fetch(`${baseUrl}/images/generations`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${apiKey}`,
+                },
+                body: JSON.stringify({
+                  model,
+                  prompt: attemptPrompt,
+                  size: imageSize,
+                }),
+              }),
+            120000,
+            "CogView image generation"
+          ),
         {
           maxRetries: 3,
           baseDelayMs: 3000,
