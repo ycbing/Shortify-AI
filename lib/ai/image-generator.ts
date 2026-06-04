@@ -199,7 +199,18 @@ export async function generateImage(
     return generateImageWithKling(prompt, size);
   }
 
-  return generateImageWithCogView(prompt, style, size, options?.userId);
+  // CogView with LibLib fallback
+  try {
+    return await generateImageWithCogView(prompt, style, size, options?.userId);
+  } catch (cogviewErr) {
+    if (liblibConfigured) {
+      log.warn(`CogView failed, falling back to LibLib`, {
+        error: cogviewErr instanceof Error ? cogviewErr.message : String(cogviewErr),
+      });
+      return generateImageWithLibLib(prompt, size);
+    }
+    throw cogviewErr;
+  }
 }
 
 export async function downloadImage(
