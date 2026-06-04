@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { ThemeInput } from "@/components/create/theme-input";
 import { StyleSelector } from "@/components/create/style-selector";
 import { EpisodeCounter } from "@/components/create/episode-counter";
+import { TemplateSelector } from "@/components/create/template-selector";
 import { BgmUpload } from "@/components/create/bgm-upload";
 import { StepIndicator } from "@/components/create/step-indicator";
 import { Loader2, Sparkles } from "lucide-react";
@@ -61,6 +62,13 @@ function CreatePageContent() {
   }, [searchParams]);
 
   const canSubmit = theme.trim().length > 0 && genre !== "" && style !== "";
+
+  const handleTemplateSelect = (template: { theme: string; genre: string; style: string; episodeCount: number }) => {
+    setTheme(template.theme);
+    setGenre(template.genre as DramaGenreType);
+    setStyle(template.style as DramaStyleType);
+    setEpisodeCount(template.episodeCount);
+  };
 
   const handleCreate = async () => {
     if (!canSubmit) return;
@@ -163,6 +171,13 @@ function CreatePageContent() {
             onGenreChange={(v) => setGenre(v)}
             onStyleChange={(v) => setStyle(v)}
           />
+
+          {/* Template Quick Select */}
+          <div className="space-y-3">
+            <label className="text-sm font-medium">📦 热门模板</label>
+            <p className="text-xs text-muted-foreground">选择热门题材模板，一键开始创作</p>
+            <TemplateSelector onSelect={handleTemplateSelect} selectedTheme={theme} />
+          </div>
 
           {/* Inspiration Cards */}
           <div id="inspirations" className="space-y-3">
