@@ -8,7 +8,7 @@ import { StepIndicator } from "@/components/create/step-indicator";
 import { VoiceoverPanel } from "@/components/drama/voiceover-panel";
 import { VideoPreview } from "@/components/drama/video-preview";
 import { ExportDialog } from "@/components/drama/export-dialog";
-import { Loader2, ArrowLeft, Film, Check, AlertCircle, RefreshCw, Clock3, Square } from "lucide-react";
+import { Loader2, ArrowLeft, Film, Check, AlertCircle, RefreshCw, Clock3, Square, Sparkles, Music } from "lucide-react";
 import Link from "next/link";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
@@ -381,6 +381,35 @@ export default function PreviewPageContent() {
         const errMsg = errData.error || "配音生成失败";
         toast.error(errMsg);
         if (errData.code === "INSUFFICIENT_CREDITS") {
+          toast.error("积分不足，请前往设置页面充值", { duration: 5000 });
+        }
+      }
+    } catch {
+      toast.error("网络错误，请重试");
+    } finally {
+      setLoadingAction("");
+    }
+  };
+
+  const handleGenerateBgm = async () => {
+    if (!dramaId || loadingAction === "bgm") return;
+    setLoadingAction("bgm");
+
+    try {
+      const res = await fetch("/api/generate/bgm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dramaId }),
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (res.ok) {
+        toast.success(data.message || "AI 背景音乐已生成");
+        // 刷新 drama 数据以获取 bgmUrl
+        await fetchEpisodes(false);
+      } else {
+        toast.error(data.error || "AI 配乐失败");
+        if (data.code === "INSUFFICIENT_CREDITS") {
           toast.error("积分不足，请前往设置页面充值", { duration: 5000 });
         }
       }
@@ -838,6 +867,35 @@ export default function PreviewPageContent() {
                     <>
                       <Film className="h-4 w-4 mr-2" />
                       生成 AI 视频
+                    </>
+                  )}
+                </Button>
+              </div>
+
+              {/* AI BGM 自动配乐 */}
+              <div className="border border-emerald-500/30 rounded-lg p-4 sm:p-6 bg-emerald-500/5">
+                <div className="flex items-center gap-2 mb-2">
+                  <Music className="h-5 w-5 text-emerald-400" />
+                  <h3 className="font-semibold text-sm sm:text-base">AI 自动配乐</h3>
+                </div>
+                <p className="text-xs sm:text-sm text-muted-foreground mb-2">
+                  根据剧情情绪自动生成背景音乐，合成视频时将自动混入
+                </p>
+                <Button
+                  onClick={handleGenerateBgm}
+                  disabled={loadingAction === "bgm"}
+                  variant="outline"
+                  className="min-h-[40px] w-full sm:w-auto border-emerald-500/30 hover:bg-emerald-500/10"
+                >
+                  {loadingAction === "bgm" ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      AI 配乐中...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="h-4 w-4 mr-2" />
+                      AI 自动配乐
                     </>
                   )}
                 </Button>
