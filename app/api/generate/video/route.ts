@@ -448,6 +448,7 @@ async function processVideos(
         });
         const result = await generateVideo(prompt, publicImageUrl, style, {
           characterReference: shotCharRef,
+          userId,
         });
         await throwIfGenerationTaskCancelled(taskId);
 

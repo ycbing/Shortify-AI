@@ -55,9 +55,9 @@ const SERVICE_ICONS: Record<string, React.ReactNode> = {
 
 const PROVIDER_OPTIONS: Record<string, string[]> = {
   llm: ["glm", "deepseek", "openai"],
-  image: ["glm", "openai"],
+  image: ["glm", "openai", "liblib", "kling"],
   tts: ["xunfei", "edge"],
-  video: ["glm"],
+  video: ["glm", "liblib", "kling"],
 };
 
 const MODEL_OPTIONS: Record<string, Record<string, string[]>> = {
@@ -72,6 +72,14 @@ const MODEL_OPTIONS: Record<string, Record<string, string[]>> = {
   openai: {
     llm: ["gpt-4o-mini", "gpt-4o", "gpt-4-turbo"],
     image: ["dall-e-3"],
+  },
+  liblib: {
+    image: ["star-3-alpha", "dreamtech-xl"],
+    video: ["kling-v2-6", "kling-v2.6"],
+  },
+  kling: {
+    image: ["kling-v1.6", "kling-v2"],
+    video: ["kling-v1.6", "kling-v2"],
   },
   xunfei: {
     tts: ["x4_xiaorui", "x4_xiaoyan", "x4_lingling", "x4_yezhi", "x4_yezi"],

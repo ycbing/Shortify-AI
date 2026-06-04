@@ -63,8 +63,12 @@ export interface GenerateVideoOptions {
 }
 
 /**
- * Unified video generation that routes to Kling or CogVideoX.
- * Uses Kling when configured and character references are available.
+ * Unified video generation that routes based on resolved model config.
+ * 根据 resolveConfig().provider 动态路由到不同视频生成适配器：
+ * - liblib → LibLib Kling (v2.6)
+ * - kling → Kling 直连
+ * - glm → 智谱 CogVideoX
+ * - 其他兼容 OpenAI 格式的提供商也能通过 baseUrl+apiKey 工作
  */
 export async function generateVideo(
   prompt: string,
@@ -72,47 +76,55 @@ export async function generateVideo(
   style?: string,
   options?: GenerateVideoOptions
 ): Promise<{ videoUrl: string; coverUrl?: string }> {
-  // LibLib Kling video (preferred - via LibLib proxy, cheaper)
-  const liblibConfigured = isLibLibConfigured();
-  const klingConfigured =
-    process.env.KLING_ACCESS_KEY && process.env.KLING_SECRET_KEY;
-  const hasCharRef = options?.characterReference?.imageUrl;
+  const userId = options?.userId || null;
+  
+  // 尝试从模型配置解析（优先用户配置 > 全局 > 环境变量）
+  const config = await resolveConfig(userId, "video").catch(() => null);
+  const provider = config?.provider || process.env.VIDEO_PROVIDER || "cogvideo";
+  const hasCharRef = !!options?.characterReference?.imageUrl;
 
-  const videoProvider = process.env.VIDEO_PROVIDER || "cogvideo";
-  log.info("Video generation provider", { provider: videoProvider });
+  log.info("Video generation", {
+    provider,
+    source: config?.source || "env",
+    model: config?.modelName || process.env.VIDEO_MODEL || "cogvideox-3",
+    hasCharRef,
+  });
 
-  if (liblibConfigured && videoProvider === "liblib") {
-    const sizeObj = (options?.size || "1920x1080").split("x");
-    const ar = `${sizeObj[1]}:${sizeObj[0]}`; // height:width
+  // ========== LibLib Kling (provider=liblib) ==========
+  if (provider === "liblib" && isLibLibConfigured()) {
+    const sizeStr = options?.size || (config?.config?.size as string) || "1920x1080";
+    const sizeObj = sizeStr.split("x");
+    const ar = `${sizeObj[1]}:${sizeObj[0]}`;
+    const aspectRatio = (ar === "1080:1920" ? "9:16" : ar === "1080:1080" ? "1:1" : "16:9") as "16:9" | "9:16" | "1:1";
+    const duration = String((config?.config?.duration as number) || 5);
+    
+    log.info("Using LibLib Kling for video", { aspectRatio, duration });
     const result = await generateVideoWithLibLibKling({
       prompt,
       startFrame: imageUrl,
-      aspectRatio: (ar === "1080:1920" ? "9:16" : ar === "1080:1080" ? "1:1" : "16:9") as "16:9" | "9:16" | "1:1",
-      duration: "5",
+      aspectRatio,
+      duration: duration as "5" | "10",
       mode: "std",
     });
     return { videoUrl: result.videoUrl, coverUrl: result.coverUrl };
   }
 
-  // Direct Kling API
-  if (hasCharRef && klingConfigured) {
-    log.info("Using direct Kling for video generation with character reference");
+  // ========== Kling 直连 (provider=kling) ==========
+  if (provider === "kling" && process.env.KLING_ACCESS_KEY && process.env.KLING_SECRET_KEY) {
+    log.info("Using direct Kling for video", { hasCharRef });
     return generateVideoWithKling(
       prompt,
       imageUrl,
-      options!.characterReference
+      options?.characterReference
     );
   }
 
-  if ((process.env.VIDEO_PROVIDER || "") === "kling" && klingConfigured) {
-    log.info("Using Kling for video generation");
-    return generateVideoWithKling(prompt, imageUrl);
-  }
-
-  // CogVideoX path (submit + poll)
+  // ========== 智谱 CogVideoX (provider=glm) 或默认 ==========
+  // CogVideoX 支持通过 resolveConfig 的 baseUrl/apiKey 或环境变量
   const { taskId } = await submitVideoGeneration(prompt, imageUrl, style, {
     quality: options?.quality,
     size: options?.size,
+    userId: userId || undefined,
   });
   return waitForVideoCompletion(taskId);
 }
