@@ -5,6 +5,7 @@ import { episodes } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { generateSubtitlesWithASR } from "@/lib/ai/subtitle-generator";
 import { isAsrConfigured } from "@/lib/ai/asr-client";
+import { isAnyAsrConfigured } from "@/lib/ai/groq-asr";
 import type { Shot, ShotAudio } from "@/types/drama";
 import { createLogger } from "@/lib/logger";
 
@@ -23,9 +24,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "未登录" }, { status: 401 });
     }
 
-    if (!isAsrConfigured()) {
+    if (!isAnyAsrConfigured()) {
       return NextResponse.json(
-        { error: "ASR 未配置，请设置 GLM_API_KEY 环境变量" },
+        { error: "ASR 未配置，请设置 GROQ_API_KEY（推荐）或 GLM_API_KEY 环境变量" },
         { status: 400 }
       );
     }

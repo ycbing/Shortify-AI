@@ -2,6 +2,10 @@ import path from "path";
 import fs from "fs/promises";
 import type { Shot, ShotAudio } from "@/types/drama";
 import { transcribeAudio, isAsrConfigured } from "@/lib/ai/asr-client";
+import {
+  isAnyAsrConfigured,
+  transcribeAudioUniversal,
+} from "@/lib/ai/groq-asr";
 import { createLogger } from "@/lib/logger";
 
 const log = createLogger("subtitle-gen");
@@ -114,8 +118,8 @@ export async function generateSubtitlesWithASR(
 
   await fs.mkdir(outputDir, { recursive: true });
 
-  if (!isAsrConfigured()) {
-    throw new Error("ASR not configured. Set GLM_API_KEY in environment.");
+  if (!isAnyAsrConfigured()) {
+    throw new Error("ASR not configured. Set GROQ_API_KEY (recommended) or GLM_API_KEY.");
   }
 
   // Build audio map
@@ -153,20 +157,27 @@ export async function generateSubtitlesWithASR(
 
     // Try ASR recognition if audio file exists
     let asrText = "";
+    let asrProvider = "";
     if (audio?.audioUrl) {
       try {
-        const { exec } = await import("child_process");
-        const { promisify } = await import("util");
-        const execAsync = promisify(exec);
-
         try {
           await fs.access(audio.audioUrl);
-          const result = await transcribeAudio(audio.audioUrl, {
-            hotwords: characterNames,
-          });
-          asrText = result.text.trim();
         } catch {
           // Audio file doesn't exist, skip ASR
+        }
+
+        if (asrText === "") {
+          // Priority: Groq (fast, precise) → GLM ASR
+          const result = await transcribeAudioUniversal(audio.audioUrl, {
+            hotwords: characterNames,
+            language: "zh",
+            prompt: characterNames.join(", "),
+          });
+          asrText = result.text.trim();
+          asrProvider = result.provider;
+          log.debug(`ASR (${asrProvider}) result for shot ${shot.shotNumber}`, {
+            text: asrText.substring(0, 50),
+          });
         }
       } catch {
         // ASR failed, continue with original text

@@ -301,21 +301,21 @@ async function concatMixedVideos(
   await fs.mkdir(outputDir, { recursive: true });
 
   const listFile = path.join(outputDir, `concat-list-${epNum}.txt`);
-  const lines = mixedPaths.map((p) => `file '${p}'`).join("\n");
+  const lines = mixedPaths.map((p) => `file '${path.relative(outputDir, p)}'`).join("\n");
   await fs.writeFile(listFile, lines);
 
   // Step 1: Concat with stream copy (NO re-encoding)
   const rawOutputPath = path.join(outputDir, `episode-${epNum}-raw.mp4`);
   try {
     execSync(
-      `ffmpeg -y -f concat -safe 1 -i "${listFile}" -c copy -movflags +faststart "${rawOutputPath}"`,
+      `cd "${outputDir}" && ffmpeg -y -f concat -safe 1 -i concat-list-${epNum}.txt -c copy -movflags +faststart episode-${epNum}-raw.mp4`,
       { timeout: 120000 }
     );
   } catch (err) {
     // Fallback: re-encode if stream copy fails (different params)
     log.warn("Concat copy failed, re-encoding", { episodeNumber: epNum });
     execSync(
-      `ffmpeg -y -f concat -safe 1 -i "${listFile}" -c:v libx264 -preset fast -crf 18 -c:a aac -movflags +faststart "${rawOutputPath}"`,
+      `cd "${outputDir}" && ffmpeg -y -f concat -safe 1 -i concat-list-${epNum}.txt -c:v libx264 -preset fast -crf 18 -c:a aac -movflags +faststart episode-${epNum}-raw.mp4`,
       { timeout: 300000 }
     );
   }

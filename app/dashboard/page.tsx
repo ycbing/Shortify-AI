@@ -186,12 +186,6 @@ export default function DashboardPage() {
                 <span className="hidden sm:inline">创建短剧</span>
               </Button>
             </Link>
-            <Link href="/narrate">
-              <Button variant="outline" size="sm" className="min-h-[44px] min-w-[44px] px-2 sm:px-3" title="短视频解说">
-                🎙️
-                <span className="hidden sm:inline ml-1">解说视频</span>
-              </Button>
-            </Link>
           </div>
         </div>
       </header>

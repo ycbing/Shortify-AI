@@ -2,7 +2,6 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import * as schema from "./schema";
 import * as modelConfigSchema from "./model-config-schema";
-export * from "./narration-schema";
 export { modelConfigs, userModelConfigs } from "./model-config-schema";
 export type { ModelConfig, NewModelConfig, UserModelConfig, NewUserModelConfig } from "./model-config-schema";
 

@@ -93,9 +93,9 @@ export async function concatWithXfade(
   if (transition === "none") {
     // Fallback to simple concat without transitions
     const concatListPath = path.join(tempDir, "concat-list.txt");
-    const concatContent = clipPaths.map((p) => `file '${p}'`).join("\n");
+    const concatContent = clipPaths.map((p) => `file '${path.relative(tempDir, p)}'`).join("\n");
     await fs.writeFile(concatListPath, concatContent);
-    const cmd = `ffmpeg -f concat -safe 1 -i "${concatListPath}" -c copy -y "${outputPath}"`;
+    const cmd = `cd "${tempDir}" && ffmpeg -f concat -safe 1 -i concat-list.txt -c copy -y "${path.basename(outputPath)}"`
     await execAsync(cmd, { timeout: 300000 });
     return outputPath;
   }
@@ -135,8 +135,8 @@ export async function concatWithXfade(
  log.warn(`Clip A too short (${durationA.toFixed(1)}s) for xfade (${td}s), concatenating without transition`);
         const simpleOut = path.join(tempDir, `merge-pass${pass}-${nextPaths.length}.mp4`);
         const concatListPath = path.join(tempDir, `concat-pass${pass}-${nextPaths.length}.txt`);
-        await fs.writeFile(concatListPath, `file '${clipA}'\nfile '${clipB}'`);
-        await execAsync(`ffmpeg -f concat -safe 1 -i "${concatListPath}" -c copy -y "${simpleOut}"`, { timeout: 180000 });
+        await fs.writeFile(concatListPath, `file '${path.relative(tempDir, clipA)}'\nfile '${path.relative(tempDir, clipB)}'`);
+        await execAsync(`cd "${tempDir}" && ffmpeg -f concat -safe 1 -i "concat-pass${pass}-${nextPaths.length}.txt" -c copy -y "${path.basename(simpleOut)}"`, { timeout: 180000 });
         nextPaths.push(simpleOut);
         continue;
       }
@@ -157,8 +157,8 @@ export async function concatWithXfade(
       await execAsync(cmd, { timeout: 300000 }).catch(async (err) => {
         log.warn(`xfade failed, falling back to simple concat: ${err instanceof Error ? err.message : err}`);
         const concatListPath = path.join(tempDir, `concat-fallback-${nextPaths.length}.txt`);
-        await fs.writeFile(concatListPath, `file '${clipA}'\nfile '${clipB}'`);
-        await execAsync(`ffmpeg -f concat -safe 1 -i "${concatListPath}" -c copy -y "${mergeOut}"`, { timeout: 180000 });
+        await fs.writeFile(concatListPath, `file '${path.relative(tempDir, clipA)}'\nfile '${path.relative(tempDir, clipB)}'`);
+        await execAsync(`cd "${tempDir}" && ffmpeg -f concat -safe 1 -i "concat-fallback-${nextPaths.length}.txt" -c copy -y "${path.basename(mergeOut)}"`, { timeout: 180000 });
       });
 
       nextPaths.push(mergeOut);
@@ -606,10 +606,11 @@ export async function mergeVideos(
   await fs.mkdir(dir, { recursive: true });
 
   const concatListPath = path.join(dir, "concat-list.txt");
-  const concatContent = videoPaths.map((p) => `file '${p}'`).join("\n");
+  // Use relative paths for ffmpeg concat (absolute paths fail with -safe 1)
+  const concatContent = videoPaths.map((p) => `file '${path.relative(dir, p)}'`).join("\n");
   await fs.writeFile(concatListPath, concatContent);
 
-  const cmd = `ffmpeg -f concat -safe 1 -i "${concatListPath}" -c copy -y "${outputPath}"`;
+  const cmd = `cd "${dir}" && ffmpeg -f concat -safe 1 -i concat-list.txt -c copy -y "${path.basename(outputPath)}"`;
   await execAsync(cmd, { timeout: 300000 });
 
   await fs.unlink(concatListPath).catch(() => {});

@@ -1,10 +1,6 @@
 import { getStyleImagePrompt } from "./script-generator";
 import { withRetry, withTimeout } from "@/lib/resilience";
 import { createLogger } from "@/lib/logger";
-import { generateImageWithKling } from "./kling-client";
-import type { KlingCharacterReference } from "./kling-client";
-import { generateImageWithLibLib, isLibLibConfigured } from "./liblib-client";
-import type { LibLibCharacterReference } from "./liblib-client";
 import { resolveConfig } from "@/lib/ai/model-resolver";
 
 const log = createLogger("image-generator");
@@ -155,54 +151,6 @@ export async function generateImage(
   size: ImageSize = "1728x960",
   options?: GenerateImageOptions
 ): Promise<string> {
-  const klingConfigured = process.env.KLING_ACCESS_KEY && process.env.KLING_SECRET_KEY;
-  const provider = process.env.IMAGE_PROVIDER || "cogview";
-  const hasRefs = options?.characterReferences && options.characterReferences.length > 0;
-  const liblibConfigured = process.env.ENABLE_LIBLIB !== "false" && isLibLibConfigured();
-  if (liblibConfigured) {
-    if (hasRefs) {
-      const primaryRef = options!.characterReferences![0];
-      const liblibRef: LibLibCharacterReference = {
-        imageUrl: primaryRef.imageUrl,
-        characterName: primaryRef.characterName,
-        type: primaryRef.type,
-      };
-      log.info(`Using LibLib Star-3 with character reference for "${primaryRef.characterName}"`, {
-        provider: "liblib",
-        hasReference: true,
-      });
-      return generateImageWithLibLib(prompt, size, liblibRef);
-    }
-    if (provider === "liblib") {
-      log.info(`Using LibLib without character reference`, { provider: "liblib" });
-      return generateImageWithLibLib(prompt, size);
-    }
-  }
-
-  // Fallback to Kling when character references available
-  if (hasRefs && klingConfigured) {
-    const primaryRef = options!.characterReferences![0];
-    const klingRef: KlingCharacterReference = {
-      imageUrl: primaryRef.imageUrl,
-      type: primaryRef.type,
-    };
-    log.info(`Using Kling with character reference for "${primaryRef.characterName}"`, {
-      provider: "kling",
-      hasReference: true,
-    });
-    return generateImageWithKling(prompt, size, klingRef);
-  }
-
-  // Fallback to Kling for everything if explicitly configured
-  if (provider === "kling" && klingConfigured) {
-    log.info(`Using Kling without character reference`, {
-      provider: "kling",
-      hasReference: false,
-    });
-    return generateImageWithKling(prompt, size);
-  }
-
-  // CogView (GLM Image)
   return await generateImageWithCogView(prompt, style, size, options?.userId);
 }
 

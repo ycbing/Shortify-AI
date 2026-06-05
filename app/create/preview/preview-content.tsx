@@ -427,14 +427,12 @@ export default function PreviewPageContent() {
     setError("");
 
     try {
-      const res = await fetch("/api/compose", {
+      const res = await fetch("/api/generate/voiceover", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           dramaId,
-          materialSource: materialSource === "pexels" ? "pexels" : undefined,
-          transition: transition !== "none" ? transition : undefined,
-          transitionDuration: transitionDuration,
+          autoCompose: true,
         }),
       });
 

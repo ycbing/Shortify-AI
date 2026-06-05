@@ -6,8 +6,6 @@ import { eq } from "drizzle-orm";
 import { INITIAL_USER_CREDITS } from "@/lib/constants";
 import { registerSchema } from "@/lib/validation";
 import { checkRateLimit } from "@/lib/rate-limiter";
-import { sendEmail, buildVerifyEmailHtml } from "@/lib/email";
-import { createToken } from "@/lib/tokens";
 import { createLogger } from "@/lib/logger";
 
 const log = createLogger("auth-api");
@@ -69,8 +67,7 @@ export async function POST(request: NextRequest) {
     });
 
     // Send verification email (non-blocking)
-    const verifyTokenVal = await createToken(email, "verify_email");
-    sendEmail(email, "验证你的邮箱 - Shortify AI", buildVerifyEmailHtml(name || email, verifyTokenVal));
+
 
     return NextResponse.json({
       message: "注册成功，请查收验证邮件",

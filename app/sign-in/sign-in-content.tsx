@@ -79,12 +79,7 @@ export default function SignInContent() {
               />
             </div>
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="password">密码</Label>
-                <Link href="/forgot-password" className="text-xs text-muted-foreground hover:text-emerald-400 transition">
-                  忘记密码？
-                </Link>
-              </div>
+              <Label htmlFor="password">密码</Label>
               <Input
                 id="password"
                 type="password"
