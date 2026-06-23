@@ -25,6 +25,7 @@ import {
   updateGenerationTaskProgress,
 } from "@/lib/generation";
 import { tryAcquireUserSlot, releaseUserSlot, getUserActiveCount } from "@/lib/resilience";
+import { generateVideo, downloadVideo, imageToBase64 } from "@/lib/ai/video-generator";
 import { createLogger } from "@/lib/logger";
 
 const log = createLogger("voiceover-api");
@@ -498,6 +499,60 @@ async function processVoiceoverGeneration({
             const shotImageDir = path.join(
               uploadDir, "images", dramaId, `episode-${episode.episodeNumber}`
             );
+
+            // ── AI Video Generation (Wan2.7 / CogVideoX) ──
+            const VIDEO_PROVIDER = process.env.VIDEO_PROVIDER || "cogvideo";
+            const useAiVideo = VIDEO_PROVIDER !== "none" && VIDEO_PROVIDER !== "kenburns";
+            const aiVideoDir = path.join(
+              uploadDir, "videos", dramaId, `episode-${episode.episodeNumber}-ai`
+            );
+
+            if (useAiVideo) {
+              const shotsNeedingVideo = shots.filter((s) => !s.aiVideoUrl);
+              if (shotsNeedingVideo.length > 0) {
+                log.info(`Generating AI videos for ${shotsNeedingVideo.length} shots`, {
+                  dramaId, episodeNumber: episode.episodeNumber, provider: VIDEO_PROVIDER,
+                });
+                await touchGenerationTaskHeartbeat(taskId, {
+                  currentEpisode: episode.episodeNumber,
+                  stage: "ai-video",
+                  completedCount: 0,
+                  episodeCount: freshEpisodes.length,
+                });
+
+                for (let idx = 0; idx < shotsNeedingVideo.length; idx++) {
+                  const shot = shotsNeedingVideo[idx];
+                  await throwIfGenerationTaskCancelled(taskId);
+                  try {
+                    const imgPath = path.join(shotImageDir, `shot-${shot.shotNumber}.jpg`);
+                    await fs.access(imgPath);
+                    // Convert image to base64 for external providers (COS private bucket)
+                    const base64DataUrl = await imageToBase64(imgPath);
+                    const prompt = shot.visual || `Cinematic shot from ${dramaData?.genre || "drama"} short film`;
+                    const result = await generateVideo(prompt, base64DataUrl, "realistic", {
+                      userId,
+                    });
+                    const localVideoPath = path.join(aiVideoDir, `shot-${shot.shotNumber}.mp4`);
+                    await downloadVideo(result.videoUrl, localVideoPath);
+                    shot.aiVideoUrl = localVideoPath;
+                    log.info(`AI video generated for shot ${shot.shotNumber}`, {
+                      episodeNumber: episode.episodeNumber,
+                      size: (await fs.stat(localVideoPath)).size,
+                    });
+                  } catch (err) {
+                    log.warn(`AI video generation failed for shot ${shot.shotNumber}, falling back to Ken Burns`, {
+                      error: (err as Error).message,
+                    });
+                  }
+                  await touchGenerationTaskHeartbeat(taskId, {
+                    currentEpisode: episode.episodeNumber,
+                    stage: "ai-video",
+                    completedCount: idx + 1,
+                    episodeCount: freshEpisodes.length,
+                  });
+                }
+              }
+            }
 
             for (const shot of shots) {
               if (shot.aiVideoUrl) {

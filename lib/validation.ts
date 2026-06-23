@@ -13,11 +13,14 @@ export const characterSchema = z.object({
   referenceImageUrl: z.string().max(2000).optional(),
 });
 
+export const aspectRatioSchema = z.enum(["landscape", "vertical"]);
+
 export const createDramaSchema = z.object({
   theme: z.string().min(1).max(1000),
   genre: genreSchema,
   style: styleSchema,
   episodeCount: episodeCountSchema,
+  aspectRatio: aspectRatioSchema.optional(),
 });
 
 export const registerSchema = z.object({

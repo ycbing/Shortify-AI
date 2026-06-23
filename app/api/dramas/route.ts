@@ -90,7 +90,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { theme, genre, style, episodeCount } = parsed.data;
+    const { theme, genre, style, episodeCount, aspectRatio } = parsed.data;
     const id = uuidv4();
 
     const [drama] = await db
@@ -104,6 +104,7 @@ export async function POST(request: NextRequest) {
         genre,
         style,
         episodeCount,
+        aspectRatio: aspectRatio || "landscape",
         status: "draft",
       })
       .returning();

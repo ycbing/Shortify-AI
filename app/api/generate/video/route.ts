@@ -157,7 +157,7 @@ export async function POST(request: NextRequest) {
     const characters: Character[] = Array.isArray(drama.characters) ? drama.characters : [];
 
     // Process in background
-    processVideos(dramaId, episodesNeedingVideo, drama.style || "realistic", taskId, session.user.id, characters).catch(
+    processVideos(dramaId, episodesNeedingVideo, drama.style || "realistic", taskId, session.user.id, characters, (drama.aspectRatio as "landscape" | "vertical") || "landscape").catch(
       err => log.error("Background video processing failed", { error: err instanceof Error ? err.message : String(err) })
     ).finally(() => releaseUserSlot(session.user.id));
 
@@ -217,7 +217,7 @@ async function uploadShotImageAndGetPublicUrl(
   shotNumber: number
 ): Promise<string | undefined> {
   const VIDEO_PROVIDER = process.env.VIDEO_PROVIDER || "cogvideo";
-  const isExternalProvider = VIDEO_PROVIDER === "liblib" || VIDEO_PROVIDER === "kling";
+  const isExternalProvider = VIDEO_PROVIDER === "liblib" || VIDEO_PROVIDER === "kling" || VIDEO_PROVIDER === "wan" || VIDEO_PROVIDER === "dashscope";
 
   // Upload to COS for storage
   if (isCosConfigured()) {
@@ -230,7 +230,8 @@ async function uploadShotImageAndGetPublicUrl(
   }
 
   // For CogVideoX: return base64 data URI (no external URL needed)
-  if (!isExternalProvider) {
+  // For Wan2.7: also return base64 (COS private bucket URLs not accessible by DashScope)
+  if (!isExternalProvider || VIDEO_PROVIDER === "wan" || VIDEO_PROVIDER === "dashscope") {
     try {
       const buffer = await fs.readFile(imagePath);
       const ext = path.extname(imagePath).toLowerCase();
@@ -264,7 +265,8 @@ async function uploadShotImageAndGetPublicUrl(
 async function mixAudioToShotVideo(
   videoPath: string,
   audioPath: string,
-  outputPath: string
+  outputPath: string,
+  aspectRatio: "landscape" | "vertical" = "landscape"
 ): Promise<string> {
   // Get audio duration
   let audioDuration = 5;
@@ -281,7 +283,11 @@ async function mixAudioToShotVideo(
 
   // Video loop to audio length, overlay audio, output with consistent codec params
   // -c:v libx264 -crf 18 for high quality (this is the only encode per shot)
-  const cmd = `ffmpeg -y -stream_loop -1 -i "${videoPath}" -i "${audioPath}" -filter_complex "[0:v]scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black,fade=t=in:st=0:d=${fadeDuration},fade=t=out:st=${Math.max(0, audioDuration - fadeDuration)}:d=${fadeDuration}[v];[1:a]aformat=sample_rates=44100:channel_layouts=stereo[a]" -map "[v]" -map "[a]" -t ${audioDuration} -c:v libx264 -crf 18 -preset fast -pix_fmt yuv420p -c:a aac -b:a 128k -shortest -movflags +faststart "${outputPath}"`;
+  const scaleFilter = aspectRatio === "vertical"
+    ? "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black"
+    : "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black";
+
+  const cmd = `ffmpeg -y -stream_loop -1 -i "${videoPath}" -i "${audioPath}" -filter_complex "[0:v]${scaleFilter},fade=t=in:st=0:d=${fadeDuration},fade=t=out:st=${Math.max(0, audioDuration - fadeDuration)}:d=${fadeDuration}[v];[1:a]aformat=sample_rates=44100:channel_layouts=stereo[a]" -map "[v]" -map "[a]" -t ${audioDuration} -c:v libx264 -crf 18 -preset fast -pix_fmt yuv420p -c:a aac -b:a 128k -shortest -movflags +faststart "${outputPath}"`;
 
   await execAsync(cmd, { timeout: 120000 });
   return outputPath;
@@ -296,7 +302,8 @@ async function concatMixedVideos(
   mixedPaths: string[],
   outputDir: string,
   epNum: number,
-  subtitlePath: string | null
+  subtitlePath: string | null,
+  aspectRatio: "landscape" | "vertical" = "landscape"
 ): Promise<string> {
   await fs.mkdir(outputDir, { recursive: true });
 
@@ -351,7 +358,8 @@ async function processVideos(
   style: string,
   taskId: string,
   userId: string,
-  characters: Character[] = []
+  characters: Character[] = [],
+  aspectRatio: "landscape" | "vertical" = "landscape"
 ) {
   const uploadDir = path.resolve(process.env.UPLOAD_DIR || "./uploads");
   const charRefMap = new Map<string, string>();
@@ -472,7 +480,7 @@ async function processVideos(
         try {
           await fs.access(voiceoverPath);
           const mixedPath = path.join(localVideoDir, `shot-${shot.shotNumber}-mixed.mp4`);
-          await mixAudioToShotVideo(localVideoPath, voiceoverPath, mixedPath);
+          await mixAudioToShotVideo(localVideoPath, voiceoverPath, mixedPath, aspectRatio);
           // Replace original with mixed version
           await fs.unlink(localVideoPath).catch(() => {});
           await fs.rename(mixedPath, localVideoPath);
@@ -567,7 +575,8 @@ async function processVideos(
           shotVideoPaths,
           outputDir,
           epNum,
-          subtitlePath
+          subtitlePath,
+          aspectRatio
         );
 
         // Upload the final video to COS

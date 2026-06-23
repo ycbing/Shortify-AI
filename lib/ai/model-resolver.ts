@@ -199,7 +199,21 @@ function getEnvFallback(serviceType: ServiceType): ResolvedConfig {
       };
     }
 
-    case "video":
+    case "video": {
+      const videoProvider = process.env.VIDEO_PROVIDER || "glm";
+      if (videoProvider === "wan" || videoProvider === "dashscope") {
+        return {
+          provider: "wan",
+          modelName: process.env.WAN_VIDEO_MODEL || "wan2.7-i2v",
+          apiKey: process.env.DASHSCOPE_API_KEY || "",
+          baseUrl: "https://dashscope.aliyuncs.com",
+          config: {
+            resolution: process.env.WAN_VIDEO_RESOLUTION || "720P",
+            duration: parseInt(process.env.WAN_VIDEO_DURATION || "5", 10),
+          },
+          source: "env",
+        };
+      }
       return {
         provider: "glm",
         modelName: process.env.VIDEO_MODEL || "cogvideox-3",
@@ -213,6 +227,7 @@ function getEnvFallback(serviceType: ServiceType): ResolvedConfig {
         },
         source: "env",
       };
+    }
 
     default:
       throw new Error(`未知服务类型: ${serviceType}`);

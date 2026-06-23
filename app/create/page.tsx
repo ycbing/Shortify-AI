@@ -10,6 +10,7 @@ import { EpisodeCounter } from "@/components/create/episode-counter";
 import { TemplateSelector } from "@/components/create/template-selector";
 import { BgmUpload } from "@/components/create/bgm-upload";
 import { StepIndicator } from "@/components/create/step-indicator";
+import { AspectRatioSelector } from "@/components/create/aspect-ratio-selector";
 import { Loader2, Sparkles } from "lucide-react";
 import type { DramaGenreType, DramaStyleType } from "@/types/drama";
 
@@ -47,6 +48,7 @@ function CreatePageContent() {
   const [genre, setGenre] = useState<DramaGenreType | "">("");
   const [style, setStyle] = useState<DramaStyleType | "">("");
   const [episodeCount, setEpisodeCount] = useState(3);
+  const [aspectRatio, setAspectRatio] = useState<"landscape" | "vertical">("landscape");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [bgmFile, setBgmFile] = useState<File | null>(null);
@@ -87,6 +89,7 @@ function CreatePageContent() {
           genre,
           style,
           episodeCount,
+          aspectRatio,
         }),
       });
 
@@ -172,6 +175,11 @@ function CreatePageContent() {
             onStyleChange={(v) => setStyle(v)}
           />
 
+          <AspectRatioSelector
+            value={aspectRatio}
+            onChange={setAspectRatio}
+          />
+
           {/* Template Quick Select */}
           <div className="space-y-3">
             <label className="text-sm font-medium">📦 热门模板</label>
@@ -209,6 +217,7 @@ function CreatePageContent() {
                 <span>主题</span><span className="text-foreground truncate ml-2">{theme}</span>
                 <span>类型</span><span className="text-foreground">{GENRE_LABELS[genre] || genre}</span>
                 <span>画风</span><span className="text-foreground">{STYLE_LABELS[style] || style}</span>
+                <span>比例</span><span className="text-foreground">{aspectRatio === 'landscape' ? '横屏 16:9' : '竖屏 9:16'}</span>
                 <span>集数</span><span className="text-foreground">{episodeCount} 集</span>
               </div>
             </div>

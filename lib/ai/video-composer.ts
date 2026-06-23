@@ -18,8 +18,9 @@ export interface ComposeOptions {
   audioPath: string;
   outputPath: string;
   subtitlePath?: string;
-  resolution?: "1280x720" | "1920x1080" | "3840x2160";
+  resolution?: "1280x720" | "1920x1080" | "3840x2160" | "1080x1920";
   fadeDuration?: number; // seconds
+  aspectRatio?: "landscape" | "vertical";
 }
 
 // ============ Transition types for xfade ============
@@ -180,12 +181,16 @@ export async function composeVideo(options: ComposeOptions): Promise<string> {
     audioPath,
     outputPath,
     subtitlePath,
-    resolution = "1920x1080",
+    resolution,
     fadeDuration = 0.5,
+    aspectRatio = "landscape",
   } = options;
 
   const dir = path.dirname(outputPath);
   await fs.mkdir(dir, { recursive: true });
+
+  // Determine target resolution from aspect ratio
+  const targetRes = resolution || (aspectRatio === "vertical" ? "1080x1920" : "1920x1080");
 
   // Download remote images (COS URLs) to local before passing to ffmpeg
   const localImagePath = imagePath.startsWith("http")
@@ -208,7 +213,7 @@ export async function composeVideo(options: ComposeOptions): Promise<string> {
       // use default
     }
 
-    const vfFilter = `scale=${resolution}:force_original_aspect_ratio=decrease,pad=${resolution}:(ow-iw)/2:(oh-ih)/2:color=black,fade=t=in:st=0:d=${fadeDuration},fade=t=out:st=${audioDuration - fadeDuration}:d=${fadeDuration}`;
+    const vfFilter = `scale=${targetRes}:force_original_aspect_ratio=decrease,pad=${targetRes}:(ow-iw)/2:(oh-ih)/2:color=black,fade=t=in:st=0:d=${fadeDuration},fade=t=out:st=${audioDuration - fadeDuration}:d=${fadeDuration}`;
 
     const cmd = `ffmpeg -loop 1 -i "${localImagePath}" -i "${audioPath}" -vf "${vfFilter}" -c:v libx264 -c:a aac -shortest -y "${outputPath}"`;
     await execAsync(cmd, { timeout: 120000 });
@@ -305,7 +310,8 @@ function buildKenBurnsFilter(effect: KenBurnsEffect, totalFrames: number, resolu
 async function composeShotVideo(
   input: ShotComposeInput,
   outputDir: string,
-  _episodeSubtitlePath?: string
+  _episodeSubtitlePath?: string,
+  aspectRatio: "landscape" | "vertical" = "landscape"
 ): Promise<string> {
   const { shot, shotAudio } = input;
   const outputPath = path.join(outputDir, `shot-${shot.shotNumber}.mp4`);
@@ -324,12 +330,15 @@ async function composeShotVideo(
     }
 
     const fadeDuration = Math.min(0.3, audioDuration * 0.1);
-    const cmd = `ffmpeg -y -stream_loop -1 -i "${input.videoUrl}" -i "${shotAudio.audioUrl}" -filter_complex "[0:v]scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black,fade=t=in:st=0:d=${fadeDuration},fade=t=out:st=${Math.max(0, audioDuration - fadeDuration)}:d=${fadeDuration}[v];[1:a]aformat=sample_rates=44100:channel_layouts=stereo[a]" -map "[v]" -map "[a]" -t ${audioDuration} -c:v libx264 -crf 18 -preset fast -pix_fmt yuv420p -c:a aac -b:a 128k -shortest -y "${outputPath}"`;
+    const scaleFilter = aspectRatio === "vertical"
+      ? "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black"
+      : "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black";
+    const cmd = `ffmpeg -y -stream_loop -1 -i "${input.videoUrl}" -i "${shotAudio.audioUrl}" -filter_complex "[0:v]${scaleFilter},fade=t=in:st=0:d=${fadeDuration},fade=t=out:st=${Math.max(0, audioDuration - fadeDuration)}:d=${fadeDuration}[v];[1:a]aformat=sample_rates=44100:channel_layouts=stereo[a]" -map "[v]" -map "[a]" -t ${audioDuration} -c:v libx264 -crf 18 -preset fast -pix_fmt yuv420p -c:a aac -b:a 128k -shortest -y "${outputPath}"`;
     await execAsync(cmd, { timeout: 120000 });
     return outputPath;
   }
 
-  // Otherwise: image + smooth motion + audio
+    // Otherwise: image + smooth motion + audio
   if (input.imageUrl) {
     // Download remote images (COS URLs) to local before passing to ffmpeg
     const localImagePath = await ensureLocalImage(input.imageUrl, shot.shotNumber, outputDir);
@@ -337,11 +346,9 @@ async function composeShotVideo(
     const fadeDuration = Math.min(0.5, duration * 0.15);
 
     // Use gentle zoom animation instead of zoompan (much smoother, no jitter)
-    // zoompan is CPU-heavy and produces jerky frames on small images
-    // Instead: scale up slightly + use setpts for slow playback
     const effect = pickKenBurnsEffect(shot.shotNumber);
     let motionFilter: string;
-    const targetRes = "1920x1080";
+    const targetRes = aspectRatio === "vertical" ? "1080x1920" : "1920x1080";
     const [tw, th] = targetRes.split("x").map(Number);
     const upscaleW = Math.round(tw * 1.1);
     const upscaleH = Math.round(th * 1.1);
@@ -377,7 +384,8 @@ async function composeShotVideo(
   }
 
   // No image or video — just audio as video (black frame)
-  const cmd = `ffmpeg -f lavfi -i color=c=black:s=1920x1080:d=${shotAudio.duration} -i "${shotAudio.audioUrl}" -c:v libx264 -crf 18 -preset medium -c:a aac -shortest -y "${outputPath}"`;
+  const blackSize = aspectRatio === "vertical" ? "1080x1920" : "1920x1080";
+  const cmd = `ffmpeg -f lavfi -i color=c=black:s=${blackSize}:d=${shotAudio.duration} -i "${shotAudio.audioUrl}" -c:v libx264 -crf 18 -preset medium -c:a aac -shortest -y "${outputPath}"`;
   await execAsync(cmd, { timeout: 120000 });
   return outputPath;
 }
@@ -454,6 +462,7 @@ export async function composeEpisodeFromShots(
     outputPath?: string; // explicit output path; computed from UPLOAD_DIR if omitted
     transition?: TransitionType; // transition type between shots, default "fade"
     transitionDuration?: number; // transition duration in seconds, default 0.5
+    aspectRatio?: "landscape" | "vertical"; // aspect ratio
   }
 ): Promise<string> {
   const uploadDir = path.resolve(process.env.UPLOAD_DIR || "./uploads");
@@ -487,7 +496,8 @@ export async function composeEpisodeFromShots(
         videoUrl: options?.shotVideos?.get(shot.shotNumber),
       },
       tempDir,
-      options?.subtitlePath || undefined
+      options?.subtitlePath || undefined,
+      options?.aspectRatio || "landscape"
     );
 
     shotVideoPaths.push(shotVideo);

@@ -184,7 +184,7 @@ export async function POST(request: NextRequest) {
         for (const c of characters) {
           if (c.referenceImageUrl) refMap.set(c.name, c.referenceImageUrl);
         }
-        const shotResult = await handleShotStoryboard(episode, drama.style, dramaId, uploadDir, characters, refMap);
+        const shotResult = await handleShotStoryboard(episode, drama.style, dramaId, uploadDir, characters, refMap, true, (drama.aspectRatio as "landscape" | "vertical") || "landscape");
 
         await requireCreditDeduction(
           session.user.id,
@@ -276,6 +276,7 @@ export async function POST(request: NextRequest) {
       dramaId,
       userId: session.user.id,
       style: drama.style,
+      aspectRatio: (drama.aspectRatio as "landscape" | "vertical") || "landscape",
       characters: Array.isArray(drama.characters) ? drama.characters : [],
       uploadDir,
       allEpisodes,
@@ -307,6 +308,7 @@ type StoryboardGenerationParams = {
   dramaId: string;
   userId: string;
   style: string | null;
+  aspectRatio: "landscape" | "vertical";
   characters: Character[];
   uploadDir: string;
   allEpisodes: Episode[];
@@ -317,6 +319,7 @@ async function processStoryboardGeneration({
   dramaId,
   userId,
   style,
+  aspectRatio,
   characters,
   uploadDir,
   allEpisodes,
@@ -350,7 +353,8 @@ async function processStoryboardGeneration({
             uploadDir,
             characters,
             refMap,
-            false
+            false,
+            aspectRatio
           );
           await throwIfGenerationTaskCancelled(taskId);
 
@@ -526,7 +530,8 @@ async function handleShotStoryboard(
   uploadDir: string,
   characters: Character[] = [],
   refMap: Map<string, string> = new Map(),
-  persistEpisodeImage: boolean = true
+  persistEpisodeImage: boolean = true,
+  aspectRatio: "landscape" | "vertical" = "landscape"
 ): Promise<{ episodeNumber: number; imageUrl: string; shotImages: { shotNumber: number; imageUrl: string }[] }> {
   const shots = episode.shotData as unknown as Shot[];
   const shotImages: { shotNumber: number; imageUrl: string }[] = [];
@@ -550,7 +555,7 @@ async function handleShotStoryboard(
       const imageUrl = await generateImage(
         enrichedPrompt,
         style || "realistic",
-        "1728x960",
+        aspectRatio === "vertical" ? "960x1728" : "1728x960",
         { characterReferences: characterReferences.length > 0 ? characterReferences : undefined }
       );
 

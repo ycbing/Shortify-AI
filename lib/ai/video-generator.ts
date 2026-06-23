@@ -3,6 +3,7 @@ import path from "path";
 import fs from "fs/promises";
 import { createLogger } from "@/lib/logger";
 import { resolveConfig } from "@/lib/ai/model-resolver";
+import { generateWanVideo } from "./wan-video-generator";
 
 const log = createLogger("video-generator");
 
@@ -72,7 +73,8 @@ export async function generateVideo(
   
   // 尝试从模型配置解析（优先用户配置 > 全局 > 环境变量）
   const config = await resolveConfig(userId, "video").catch(() => null);
-  const provider = config?.provider || process.env.VIDEO_PROVIDER || "cogvideo";
+  // 环境变量 VIDEO_PROVIDER 优先于数据库配置（避免数据库旧配置覆盖）
+  const provider = process.env.VIDEO_PROVIDER || config?.provider || "cogvideo";
   const hasCharRef = !!options?.characterReference?.imageUrl;
 
   log.info("Video generation", {
@@ -81,6 +83,18 @@ export async function generateVideo(
     model: config?.modelName || process.env.VIDEO_MODEL || "cogvideox-3",
     hasCharRef,
   });
+
+  // ========== 阿里百炼 Wan2.7 (provider=wan / dashscope) ==========
+  if (provider === "wan" || provider === "dashscope") {
+    const stylePrompt = getStyleImagePrompt(style as "realistic" | "anime" | "ink" | "cyberpunk");
+    const fullPrompt = imageUrl
+      ? `基于这张图片生成短视频：${prompt}。画面风格：${stylePrompt}。电影感画面。`
+      : `${prompt}。画面风格：${stylePrompt}。宽屏16:9构图，电影感画面。`;
+    return generateWanVideo(fullPrompt, imageUrl, {
+      resolution: process.env.WAN_VIDEO_RESOLUTION || "720P",
+      duration: Number(process.env.WAN_VIDEO_DURATION) || 5,
+    });
+  }
 
   // ========== 智谱 CogVideoX (provider=glm) 或默认 ==========
   // CogVideoX 支持通过 resolveConfig 的 baseUrl/apiKey 或环境变量

@@ -56,6 +56,8 @@ export const dramas = pgTable(
     coverUrl: text("cover_url"),
     bgmUrl: text("bgm_url"), // user-uploaded background music file
     mergedVideoUrl: text("merged_video_url"), // full-drama merged video
+    aspectRatio: text("aspect_ratio").default("landscape"), // landscape | vertical
+    shareToken: text("share_token"), // unique token for public share page
     shareCount: integer("share_count").default(0), // share click counter
     characters: jsonb("characters"), // v2: character list with voiceId
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),

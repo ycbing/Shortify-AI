@@ -9,7 +9,7 @@ const ENV_COGVIEW_BASE_URL =
   process.env.GLM_BASE_URL || "https://open.bigmodel.cn/api/paas/v4";
 const ENV_GLM_API_KEY = process.env.GLM_API_KEY || "";
 
-type ImageSize = "1024x1024" | "1280x720" | "1728x960";
+type ImageSize = "1024x1024" | "1280x720" | "1728x960" | "720x1280" | "960x1728";
 
 export interface GenerateImageOptions {
   characterReferences?: {
@@ -151,6 +151,18 @@ export async function generateImage(
   size: ImageSize = "1728x960",
   options?: GenerateImageOptions
 ): Promise<string> {
+  // 优先使用阿里百炼 Wanx（DASHSCOPE_API_KEY 配置时）
+  const dashscopeKey = process.env.DASHSCOPE_API_KEY;
+  if (dashscopeKey) {
+    const { generateWanxImage, imageSizeToWanx } = await import("./wan-image-generator");
+    const isVertical = size === "720x1280" || size === "960x1728";
+    const wanxSize = imageSizeToWanx(size, isVertical);
+    const stylePrompt = getStyleImagePrompt(style as "realistic" | "anime" | "ink" | "cyberpunk");
+    const fullPrompt = isVertical
+      ? `${prompt}。画面风格：${stylePrompt}。竖屏9:16构图，电影感画面。`
+      : `${prompt}。画面风格：${stylePrompt}。宽屏16:9构图，电影感画面，专业摄影级别。`;
+    return await generateWanxImage(fullPrompt, { size: wanxSize });
+  }
   return await generateImageWithCogView(prompt, style, size, options?.userId);
 }
 
