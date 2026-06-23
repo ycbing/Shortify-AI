@@ -173,3 +173,67 @@ export function imageSizeToWanx(size: string, isVertical: boolean = false): stri
   };
   return map[size] || "1280*720";
 }
+
+// ============================================================
+// Wan2.7 Image Pro — 同步调用（推荐模型）
+// Endpoint: /api/v1/services/aigc/multimodal-generation/generation
+// ============================================================
+
+/**
+ * 使用 wan2.7-image-pro 模型生成图片（同步，支持2K/4K）
+ * 推荐使用，效果比 wanx-v1 好
+ */
+export async function generateWan27ImagePro(
+  prompt: string,
+  options?: {
+    size?: "1K" | "2K" | "4K"; // 默认 2K (2048x2048)
+    n?: number;  // 生成数量 1-4，默认 1
+    style?: string;
+    watermark?: boolean;
+    thinkingMode?: boolean;
+  }
+): Promise<string> {
+  const apiKey = DASHSCOPE_API_KEY;
+  if (!apiKey) throw new Error("DASHSCOPE_API_KEY 未配置");
+
+  const response = await fetch(
+    `${DASHSCOPE_BASE_URL}/api/v1/services/aigc/multimodal-generation/generation`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: "wan2.7-image-pro",
+        input: {
+          messages: [{
+            role: "user",
+            content: [{ text: prompt }],
+          }],
+        },
+        parameters: {
+          size: options?.size || "2K",
+          n: options?.n || 1,
+          watermark: options?.watermark ?? false,
+          thinking_mode: options?.thinkingMode ?? true,
+          ...(options?.style ? { style: options.style } : {}),
+        },
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Wan2.7 Image Pro error: ${response.status} - ${error}`);
+  }
+
+  const result = await response.json();
+  // 同步响应: output.choices[0].message.content[0].image
+  const imageUrl = result.output?.choices?.[0]?.message?.content?.[0]?.image ||
+                   result.output?.results?.[0]?.url || "";
+  if (!imageUrl) throw new Error(`No image URL: ${JSON.stringify(result).substring(0, 200)}`);
+
+  log.info("Wan2.7 Image Pro generated", { size: options?.size || "2K", url: imageUrl.substring(0, 60) });
+  return imageUrl;
+}
