@@ -46,7 +46,7 @@ export async function chatCompletion(
 
   const baseUrl = modelConfig?.baseUrl || ENV_GLM_BASE_URL;
   const apiKey = modelConfig?.apiKey || ENV_GLM_API_KEY;
-  const model = options?.model || modelConfig?.modelName || process.env.GLM_MODEL || "glm-4-flash";
+  const model = options?.model || modelConfig?.modelName || process.env.GLM_MODEL || "qwen-plus";
 
   if (!apiKey) {
     throw new Error("GLM API Key 未配置：请在设置中配置模型服务或设置 GLM_API_KEY 环境变量");

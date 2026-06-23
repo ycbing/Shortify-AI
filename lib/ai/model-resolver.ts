@@ -39,7 +39,7 @@ const ENV_FALLBACKS: Record<
   llm: {
     apiKey: "GLM_API_KEY",
     baseUrl: "GLM_BASE_URL",
-    model: "LLM_MODEL",
+    model: "GLM_MODEL",
   },
   image: {
     apiKey: "GLM_API_KEY",
@@ -153,7 +153,7 @@ function getEnvFallback(serviceType: ServiceType): ResolvedConfig {
     case "llm":
       return {
         provider: "glm",
-        modelName: process.env.LLM_MODEL || "glm-4-flash",
+        modelName: process.env.GLM_MODEL || process.env.LLM_MODEL || "qwen-plus",
         apiKey: process.env.GLM_API_KEY || "",
         baseUrl: process.env.GLM_BASE_URL || "https://open.bigmodel.cn/api/paas/v4",
         config: {},
@@ -163,7 +163,7 @@ function getEnvFallback(serviceType: ServiceType): ResolvedConfig {
     case "image":
       return {
         provider: "glm",
-        modelName: process.env.IMAGE_MODEL || "cogview-3-flash",
+        modelName: process.env.IMAGE_MODEL || process.env.GLM_IMAGE_MODEL || "wanx-v1",
         apiKey: process.env.GLM_API_KEY || "",
         baseUrl: process.env.GLM_BASE_URL || "https://open.bigmodel.cn/api/paas/v4",
         config: {},
