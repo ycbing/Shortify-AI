@@ -162,9 +162,9 @@ export async function generateImage(
       : `${prompt}。画面风格：${stylePrompt}。宽屏16:9构图，电影感画面，专业摄影级别。`;
 
     // 检查环境变量或模型配置，决定用哪个模型
-    const model = (process.env.IMAGE_MODEL || "wan2.7-image-pro").toLowerCase();
-    if (model.includes("wan2.7-image-pro")) {
-      // wan2.7-image-pro 支持同步调用 + 2K/4K，效果好
+    const model = (process.env.IMAGE_MODEL || "wan2.7-image").toLowerCase();
+    if (model.includes("wan2.7-image")) {
+      // wan2.7-image 系列（含 pro）支持同步调用 + 2K/4K，效果好
       try {
         const wanSize = model.includes("4k") ? "4K" : isVertical ? "2K" : "2K";
         return await generateWan27ImagePro(fullPrompt, { size: wanSize as "1K" | "2K" | "4K" });

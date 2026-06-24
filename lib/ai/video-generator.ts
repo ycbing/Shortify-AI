@@ -87,10 +87,12 @@ export async function generateVideo(
   // ========== 阿里百炼 Wan2.7 (provider=wan / dashscope) ==========
   if (provider === "wan" || provider === "dashscope") {
     const stylePrompt = getStyleImagePrompt(style as "realistic" | "anime" | "ink" | "cyberpunk");
-    const fullPrompt = imageUrl
-      ? `基于这张图片生成短视频：${prompt}。画面风格：${stylePrompt}。电影感画面。`
-      : `${prompt}。画面风格：${stylePrompt}。宽屏16:9构图，电影感画面。`;
-    return generateWanVideo(fullPrompt, imageUrl, {
+    const isT2V = (process.env.WAN_VIDEO_MODEL || "").includes("t2v");
+    const fullPrompt = isT2V
+      ? `${prompt}。画面风格：${stylePrompt}。宽屏16:9构图，电影感画面，高质量。`
+      : `基于这张图片生成短视频：${prompt}。画面风格：${stylePrompt}。电影感画面。`;
+    // t2v: 不传图片；i2v: 传分镜图
+    return generateWanVideo(fullPrompt, isT2V ? undefined : imageUrl, {
       resolution: process.env.WAN_VIDEO_RESOLUTION || "720P",
       duration: Number(process.env.WAN_VIDEO_DURATION) || 5,
     });

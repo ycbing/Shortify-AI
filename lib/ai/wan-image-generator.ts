@@ -191,10 +191,13 @@ export async function generateWan27ImagePro(
     style?: string;
     watermark?: boolean;
     thinkingMode?: boolean;
+    modelName?: string; // 模型名，默认 "wan2.7-image-pro"
   }
 ): Promise<string> {
   const apiKey = DASHSCOPE_API_KEY;
   if (!apiKey) throw new Error("DASHSCOPE_API_KEY 未配置");
+
+  const modelName = options?.modelName || process.env.IMAGE_MODEL || "wan2.7-image-pro";
 
   const response = await fetch(
     `${DASHSCOPE_BASE_URL}/api/v1/services/aigc/multimodal-generation/generation`,
@@ -205,7 +208,7 @@ export async function generateWan27ImagePro(
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: "wan2.7-image-pro",
+        model: modelName,
         input: {
           messages: [{
             role: "user",
@@ -234,6 +237,6 @@ export async function generateWan27ImagePro(
                    result.output?.results?.[0]?.url || "";
   if (!imageUrl) throw new Error(`No image URL: ${JSON.stringify(result).substring(0, 200)}`);
 
-  log.info("Wan2.7 Image Pro generated", { size: options?.size || "2K", url: imageUrl.substring(0, 60) });
+  log.info("Wan2.7 Image generated", { model: modelName, size: options?.size || "2K", url: imageUrl.substring(0, 60) });
   return imageUrl;
 }

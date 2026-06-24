@@ -16,7 +16,8 @@ async function main() {
   if (!apiKey) { console.log("❌ 无 API Key"); return; }
 
   log("🚀 Wan2.7 i2v 视频生成");
-  log(`Model: wan2.7-i2v-2026-04-25`);
+  const model = process.env.WAN_VIDEO_MODEL || "wan2.7-i2v-2026-04-25";
+  log(`Model: ${model}`);
 
   // Step 1: 下载已有 COS 图片并通过本地 proxy 转 base64
   log("\n1/3 准备图片...");
@@ -51,13 +52,14 @@ async function generateVideo(base64Image: string, apiKey: string, startTime: num
   // Step 2: 提交 Wan2.7 视频任务
   log("\n2/3 提交 Wan2.7 视频任务...");
   
+  const model = process.env.WAN_VIDEO_MODEL || "wan2.7-i2v-2026-04-25";
+  const isT2V = model.includes("t2v");
   const body = {
-    model: "wan2.7-i2v-2026-04-25",
-    input: {
-      media: [{ type: "first_frame", url: base64Image }],
-      prompt: "一个程序员深夜在办公室加班，神情专注，敲击键盘，电脑屏幕发出蓝光，窗外城市夜景，电影感",
-    },
-    parameters: { resolution: "720P", duration: 5 },
+    model,
+    input: isT2V
+      ? { prompt: "一个程序员深夜在办公室加班，神情专注，敲击键盘，电脑屏幕发出蓝光，窗外城市夜景，宽屏16:9，电影感画面" }
+      : { media: [{ type: "first_frame", url: base64Image }], prompt: "一个程序员深夜在办公室加班，神情专注，敲击键盘，电脑屏幕发出蓝光，窗外城市夜景，电影感" },
+    parameters: { resolution: "1080P", duration: 5 },
   };
 
   const submitResp = await fetch(

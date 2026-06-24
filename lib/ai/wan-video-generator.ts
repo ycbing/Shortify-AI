@@ -50,11 +50,14 @@ export interface WanVideoOptions {
 // ── Submit ─────────────────────────────────────────────────────
 
 /**
- * 提交 Wan2.7 图生视频异步任务
+ * 提交 Wan2.7 视频生成异步任务
+ * 自动识别模型类型：
+ * - 含 imageUrl + 模型名含 "i2v" → i2v 模式（图生视频）
+ * - 无 imageUrl 或模型名含 "t2v" → t2v 模式（文生视频）
  */
 export async function submitWanVideo(
   prompt: string,
-  imageUrl: string,
+  imageUrl?: string,
   options?: WanVideoOptions
 ): Promise<string> {
   const apiKey = DASHSCOPE_API_KEY;
@@ -62,30 +65,37 @@ export async function submitWanVideo(
     throw new Error("DASHSCOPE_API_KEY 未配置，请设置环境变量 DASHSCOPE_API_KEY");
   }
 
-  // Wan2.7 requires base64 images if the URL is not publicly accessible
-  // (e.g., COS private bucket). Convert to base64 data URI.
-  let imageInput = imageUrl;
-  if (imageUrl && !imageUrl.startsWith("data:") && !imageUrl.startsWith("http://")) {
-    // Already a publicly accessible URL, use as-is
-  } else if (imageUrl && !imageUrl.startsWith("data:")) {
-    try {
-      const imgResponse = await fetch(imageUrl);
-      if (!imgResponse.ok) {
-        log.warn("Failed to fetch image for Wan2.7, trying as direct URL", {
-          status: imgResponse.status,
-        });
-      } else {
-        const buffer = Buffer.from(await imgResponse.arrayBuffer());
-        const ext = imageUrl.toLowerCase().includes(".png") ? "png" : "jpeg";
-        imageInput = `data:image/${ext};base64,${buffer.toString("base64")}`;
-        log.info("Converted image to base64 for Wan2.7", {
-          size: buffer.length,
-          imageNumber: imageUrl.split("/").pop(),
-        });
+  const model = DEFAULT_MODEL;
+  const isI2V = imageUrl && (model.includes("i2v") || !model.includes("t2v"));
+
+  // Build input based on model type
+  const input: Record<string, unknown> = { prompt };
+  if (isI2V) {
+    // i2v: convert image to base64 and include as media
+    let imageInput = imageUrl;
+    if (imageUrl && !imageUrl.startsWith("data:") && !imageUrl.startsWith("http://")) {
+      // Already accessible URL, use as-is
+    } else if (imageUrl && !imageUrl.startsWith("data:")) {
+      try {
+        const imgResponse = await fetch(imageUrl);
+        if (!imgResponse.ok) {
+          log.warn("Failed to fetch image for Wan2.7, trying as direct URL", {
+            status: imgResponse.status,
+          });
+        } else {
+          const buffer = Buffer.from(await imgResponse.arrayBuffer());
+          const ext = imageUrl.toLowerCase().includes(".png") ? "png" : "jpeg";
+          imageInput = `data:image/${ext};base64,${buffer.toString("base64")}`;
+          log.info("Converted image to base64 for Wan2.7", {
+            size: buffer.length,
+            imageNumber: imageUrl.split("/").pop(),
+          });
+        }
+      } catch (err) {
+        log.warn("Failed to convert image to base64, using original URL", { error: (err as Error).message });
       }
-    } catch (err) {
-      log.warn("Failed to convert image to base64, using original URL", { error: (err as Error).message });
     }
+    input.media = [{ type: "first_frame", url: imageInput }];
   }
 
   const {
@@ -96,16 +106,8 @@ export async function submitWanVideo(
   } = options || {};
 
   const body = {
-    model: DEFAULT_MODEL,
-    input: {
-      media: [
-        {
-          type: "first_frame",
-          url: imageInput,
-        },
-      ],
-      prompt,
-    },
+    model,
+    input,
     parameters: {
       resolution,
       duration,
@@ -212,10 +214,11 @@ export async function getWanVideoStatus(taskId: string): Promise<WanVideoStatus>
 
 /**
  * 完整的 Wan2.7 视频生成流程：提交 → 轮询 → 返回结果
+ * 支持 t2v（文生视频）和 i2v（图生视频）自动切换
  */
 export async function generateWanVideo(
   prompt: string,
-  imageUrl: string,
+  imageUrl?: string,
   options?: WanVideoOptions
 ): Promise<{ videoUrl: string; coverUrl?: string }> {
   const {

@@ -46,7 +46,7 @@ async function generateImage(query: string): Promise<string> {
     body: JSON.stringify({
       model: "wanx-v1",
       input: { prompt: query },
-      parameters: { size: "1280*720", n: 1 },
+      parameters: { size: "1920*1080", n: 1 },
     }),
   });
   const r = await resp.json();
@@ -66,12 +66,11 @@ async function generateImage(query: string): Promise<string> {
 async function generateAiVideo(base64Image: string, prompt: string): Promise<string> {
   log(`    提交 Wan2.7...`);
   const body = {
-    model: "wan2.7-i2v-2026-04-25",
-    input: {
-      media: [{ type: "first_frame", url: base64Image }],
-      prompt: prompt,
-    },
-    parameters: { resolution: "720P", duration: 5 },
+    model: process.env.WAN_VIDEO_MODEL || "wan2.7-i2v-2026-04-25",
+    input: (process.env.WAN_VIDEO_MODEL || "").includes("t2v")
+      ? { prompt }
+      : { media: [{ type: "first_frame", url: base64Image }], prompt },
+    parameters: { resolution: "1080P", duration: 5 },
   };
 
   const resp = await fetch("https://dashscope.aliyuncs.com/api/v1/services/aigc/video-generation/video-synthesis", {
@@ -178,7 +177,7 @@ async function main() {
     
     const mixedPath = path.join(uploadDir, "videos", dramaId, `shot-${sv.number}-mixed.mp4`);
     const fadeDuration = Math.min(0.3, audioDuration * 0.1);
-    const cmd = `ffmpeg -y -stream_loop -1 -i "${sv.videoPath}" -i "${audioPath}" -filter_complex "[0:v]scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black,fade=t=in:st=0:d=${fadeDuration},fade=t=out:st=${Math.max(0, audioDuration - fadeDuration)}:d=${fadeDuration}[v];[1:a]aformat=sample_rates=44100:channel_layouts=stereo[a]" -map "[v]" -map "[a]" -t ${audioDuration} -c:v libx264 -crf 18 -preset fast -pix_fmt yuv420p -c:a aac -b:a 128k -shortest -movflags +faststart -y "${mixedPath}"`;
+    const cmd = `ffmpeg -y -stream_loop -1 -i "${sv.videoPath}" -i "${audioPath}" -filter_complex "[0:v]scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black,fade=t=in:st=0:d=${fadeDuration},fade=t=out:st=${Math.max(0, audioDuration - fadeDuration)}:d=${fadeDuration}[v];[1:a]aformat=sample_rates=44100:channel_layouts=stereo[a]" -map "[v]" -map "[a]" -t ${audioDuration} -c:v libx264 -crf 18 -preset fast -pix_fmt yuv420p -c:a aac -b:a 128k -shortest -movflags +faststart -y "${mixedPath}"`;
     
     execSync(cmd, { timeout: 120000 });
     mixedPaths.push(mixedPath);
@@ -216,7 +215,7 @@ async function main() {
   log(`  🎉 完整 AI 短剧视频生成完毕！`);
   log(`  时长: ${finalDur.toFixed(1)}秒`);
   log(`  大小: ${(finalStat.size / 1024 / 1024).toFixed(1)}MB`);
-  log(`  分辨率: 720P`);
+  log(`  分辨率: 1080P`);
   log(`  镜头数: ${shots.length} (每个均为 Wan2.7 AI 视频)`);
   log(`  ${"=".repeat(60)}`);
 

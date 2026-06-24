@@ -193,7 +193,7 @@ async function main() {
           `Cinematic shot from short drama: ${(shot.narration || shot.dialog || shot.subtitle || "a cinematic scene").substring(0, 100)}`,
           imageForAiVideo,
           "realistic",
-          { quality: "speed", size: "1280x720", userId: user.id }
+          { quality: "speed", size: "1920x1080", userId: user.id }
         );
 
         log(`      ✅ AI 视频生成完成`);
