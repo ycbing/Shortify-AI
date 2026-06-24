@@ -243,6 +243,10 @@ npx tsx scripts/full-pipeline.ts
 
 ---
 
+## 🌐 友情链接
+
+- [Linux DO](https://linux.do/) — 高质量技术社区
+
 ## 📄 许可证
 
 MIT License — see [LICENSE](LICENSE)
@@ -251,7 +255,7 @@ MIT License — see [LICENSE](LICENSE)
 
 <div align="center">
 
-**Built with ❤️ by [严财兵](https://github.com/ycbing)**
+**Built with ❤️**
 
 [![GitHub stars](https://img.shields.io/github/stars/ycbing/Shortify-AI?style=social)](https://github.com/ycbing/Shortify-AI/stargazers)
 [![GitHub forks](https://img.shields.io/github/forks/ycbing/Shortify-AI?style=social)](https://github.com/ycbing/Shortify-AI/network/members)
