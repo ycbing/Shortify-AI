@@ -81,6 +81,7 @@ flowchart LR
 |------|------|
 | **Ken Burns 运镜** | 10 种运镜效果（推近/拉远/左移/右移/聚焦/旋转等） |
 | **AI 视频生成** | 支持 Wan2.7-t2v / CogVideoX-3 等模型 |
+| **对口型 Lip-sync** | 对白镜头可选接入可灵 lip-sync，配音驱动口型（`KLING_LIPSYNC=true`，消耗可灵算力） |
 | **字幕烧录** | SRT → ASS，底部居中白色黑边，自动适配时长 |
 | **BGM 背景音乐** | 上传自定义音乐，可调节音量混入配音 |
 | **SFX 环境音效** | LLM 按镜头打音效标签，内置 ffmpeg 合成预设（雨/风/雷/心跳等）+ 自备音效库 `uploads/sfx-library/` |
@@ -243,6 +244,7 @@ npx tsx scripts/full-pipeline.ts
 - [x] 声音复刻（CosyVoice Voice Enrollment，角色专属音色）
 - [x] 分镜编辑器 v1（单镜头文案编辑 + 生图/配音/视频按镜头重跑）
 - [x] SFX 环境音效（LLM 标签 + ffmpeg 合成预设 + 自备音效库）
+- [x] 对口型 Lip-sync（可灵 lip-sync API，对白镜头配音驱动口型，失败自动退回）
 - [ ] 主角 LoRA / IP-Adapter 训练管线（90%+ 一致性档）
 - [ ] 批量创作模板
 - [ ] 竖屏模式 (9:16)

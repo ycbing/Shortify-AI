@@ -4,6 +4,20 @@ import { exec } from "child_process";
 import { promisify } from "util";
 import path from "path";
 import fs from "fs/promises";
+import { createLogger } from "@/lib/logger";
+import {
+  isLipSyncEnabled,
+  submitLipSyncWithRetry,
+  waitForLipSync,
+} from "@/lib/ai/kling-client";
+import { downloadVideo } from "@/lib/ai/video-generator";
+import {
+  uploadToCos,
+  getPublicAccessibleUrl,
+  restoreCosObjectAcl,
+} from "@/lib/ai/cos-storage";
+
+const log = createLogger("shot-assets");
 
 const execAsync = promisify(exec);
 
@@ -65,4 +79,58 @@ export async function mixAudioToShotVideo(
 
   await execAsync(cmd, { timeout: 120000 });
   return outputPath;
+}
+
+/**
+ * 对口型（可选步骤）：对白镜头的 AI 视频 + 配音 → 口型匹配视频
+ * - 需 KLING_LIPSYNC=true 且配置 Kling 密钥（消耗可灵算力）
+ * - 视频/配音经 COS 临时公网 URL 提交，完成后恢复 ACL
+ * - 任何失败都退回原始视频，绝不阻塞主流程
+ * 返回（可能已替换的）视频路径
+ */
+export async function tryLipSyncShotVideo(params: {
+  videoPath: string;
+  voiceoverPath: string;
+  dramaId: string;
+  episodeNumber: number;
+  shotNumber: number;
+}): Promise<string> {
+  const { videoPath, voiceoverPath, dramaId, episodeNumber, shotNumber } = params;
+  if (!isLipSyncEnabled()) return videoPath;
+
+  const videoCosKey = `${dramaId}/videos/lipsync-src-ep${episodeNumber}-shot${shotNumber}.mp4`;
+  const audioCosKey = `${dramaId}/voiceovers/lipsync-src-ep${episodeNumber}-shot${shotNumber}.mp3`;
+
+  try {
+    log.info("Lip-sync started", { episodeNumber, shotNumber });
+
+    await uploadToCos(videoPath, videoCosKey);
+    await uploadToCos(voiceoverPath, audioCosKey);
+    const [videoUrl, audioUrl] = await Promise.all([
+      getPublicAccessibleUrl(videoCosKey),
+      getPublicAccessibleUrl(audioCosKey),
+    ]);
+
+    const taskId = await submitLipSyncWithRetry(videoUrl, audioUrl);
+    const resultUrl = await waitForLipSync(taskId);
+
+    // 结果下载并替换原始视频（替换后走常规混音，配音音轨由混音步骤统一写入）
+    const lipsyncPath = videoPath.replace(/\.mp4$/, ".lipsync.mp4");
+    await downloadVideo(resultUrl, lipsyncPath);
+    await fs.unlink(videoPath).catch(() => {});
+    await fs.rename(lipsyncPath, videoPath);
+
+    log.info("Lip-sync done", { episodeNumber, shotNumber });
+    return videoPath;
+  } catch (err) {
+    log.warn("Lip-sync failed, falling back to plain video", {
+      episodeNumber,
+      shotNumber,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return videoPath;
+  } finally {
+    restoreCosObjectAcl(videoCosKey).catch(() => {});
+    restoreCosObjectAcl(audioCosKey).catch(() => {});
+  }
 }

@@ -13,7 +13,7 @@ import {
   buildAppearancePrompt,
   buildShotCharacterRefs,
 } from "@/lib/ai/shot-prompts";
-import { findShotImage, mixAudioToShotVideo } from "@/lib/ai/shot-assets";
+import { findShotImage, mixAudioToShotVideo, tryLipSyncShotVideo } from "@/lib/ai/shot-assets";
 import { checkCredits, CREDIT_COSTS, requireCreditDeduction } from "@/lib/credits";
 import {
   completeGenerationTask,
@@ -285,8 +285,24 @@ async function processShotVideoRegeneration({
     const localVideoPath = path.join(localVideoDir, `shot-${shotNumber}.mp4`);
     await downloadVideo(result.videoUrl, localVideoPath);
 
-    // 已有配音则直接混入（与批量流程一致）
+    // 对口型（可选）：对白镜头 + 有配音 + KLING_LIPSYNC 开启
     const voiceoverPath = path.join(uploadDir, "voiceovers", dramaId, `episode-${episodeNumber}`, `shot-${shotNumber}.mp3`);
+    let hasVoiceover = false;
+    try {
+      await fs.access(voiceoverPath);
+      hasVoiceover = true;
+    } catch { /* no voiceover */ }
+    if (hasVoiceover && shot.type === "dialogue") {
+      await tryLipSyncShotVideo({
+        videoPath: localVideoPath,
+        voiceoverPath,
+        dramaId,
+        episodeNumber,
+        shotNumber,
+      });
+    }
+
+    // 已有配音则直接混入（与批量流程一致）
     try {
       await fs.access(voiceoverPath);
       const mixedPath = path.join(localVideoDir, `shot-${shotNumber}-mixed.mp4`);

@@ -23,7 +23,7 @@ import path from "path";
 import fs from "fs/promises";
 import { checkCredits, CREDIT_COSTS, requireCreditDeduction, refundCredits } from "@/lib/credits";
 import { execSync } from "child_process";
-import { findShotImage, mixAudioToShotVideo } from "@/lib/ai/shot-assets";
+import { findShotImage, mixAudioToShotVideo, tryLipSyncShotVideo } from "@/lib/ai/shot-assets";
 import { getOwnedDrama } from "@/lib/dramas";
 import { updateDramaStatus } from "@/lib/drama-status";
 import {
@@ -413,8 +413,24 @@ async function processVideos(
           await new Promise((r) => setTimeout(r, 5000));
         }
 
-        // 7. Mix voiceover audio into the AI video immediately (one encode pass)
+        // 6.5 对口型（可选）：对白镜头 + 有配音 + KLING_LIPSYNC 开启
         const voiceoverPath = path.join(uploadDir, "voiceovers", dramaId, `episode-${epNum}`, `shot-${shot.shotNumber}.mp3`);
+        let hasVoiceover = false;
+        try {
+          await fs.access(voiceoverPath);
+          hasVoiceover = true;
+        } catch { /* no voiceover */ }
+        if (hasVoiceover && shot.type === "dialogue") {
+          await tryLipSyncShotVideo({
+            videoPath: localVideoPath,
+            voiceoverPath,
+            dramaId,
+            episodeNumber: epNum,
+            shotNumber: shot.shotNumber,
+          });
+        }
+
+        // 7. Mix voiceover audio into the AI video immediately (one encode pass)
         try {
           await fs.access(voiceoverPath);
           const mixedPath = path.join(localVideoDir, `shot-${shot.shotNumber}-mixed.mp4`);
