@@ -16,6 +16,7 @@ import {
   toEdgeVoice,
   buildEmotionInstruction,
 } from "@/lib/ai/cosyvoice-tts";
+import { mixSfxIntoVoiceover, parseSfxTags } from "@/lib/ai/sfx-library";
 import { withRetry } from "@/lib/resilience";
 import { createLogger } from "@/lib/logger";
 
@@ -32,6 +33,8 @@ export interface VoiceoverResult {
 export interface GenerateVoiceoverOptions {
   /** 情感标签（紧张/开心/悲伤…），仅 CosyVoice 支持，驱动情感指令 */
   emotion?: string;
+  /** 音效标签串（"rain,door"），TTS 成功后垫入镜头配音下方 */
+  sfx?: string;
 }
 
 // ============ Core TTS function (CosyVoice → iFlytek → Edge-TTS fallback) ============
@@ -58,6 +61,7 @@ export async function generateVoiceover(
         instruction: buildEmotionInstruction(options?.emotion),
       });
       const duration = await getAudioDuration(outputPath, text.length);
+      await applySfxIfAny(outputPath, options?.sfx);
       return { filePath: outputPath, durationSeconds: duration, text };
     } catch (err) {
       log.warn("CosyVoice TTS failed, falling back", {
@@ -72,7 +76,7 @@ export async function generateVoiceover(
   if (isXunfeiConfigured()) {
     try {
       const xfyVoice = mapVoiceId(toEdgeVoice(voice));
-      return await withRetry(
+      const result = await withRetry(
         () => xunfeiTts(text, outputPath, xfyVoice),
         {
           maxRetries: 2,
@@ -85,6 +89,8 @@ export async function generateVoiceover(
           },
         }
       );
+      await applySfxIfAny(outputPath, options?.sfx);
+      return result;
     } catch (err) {
       log.warn("iFlytek TTS failed after retries, falling back to Edge-TTS", {
         error: err instanceof Error ? err.message : String(err),
@@ -126,6 +132,13 @@ export async function generateVoiceover(
     durationSeconds: duration,
     text,
   };
+}
+
+/** TTS 成功后按标签垫入音效（失败保留纯配音） */
+async function applySfxIfAny(outputPath: string, sfx?: string): Promise<void> {
+  const tags = parseSfxTags(sfx);
+  if (!tags.length) return;
+  await mixSfxIntoVoiceover(outputPath, tags);
 }
 
 // ============ V2: multi-voice shot-based voiceover ============
@@ -183,6 +196,7 @@ export async function generateShotVoiceovers(
     try {
       const result = await generateVoiceover(text, outputPath, voiceId, "+0%", "+0Hz", {
         emotion: shot.emotion,
+        sfx: shot.sfx,
       });
       results.push({
         shotNumber: shot.shotNumber,

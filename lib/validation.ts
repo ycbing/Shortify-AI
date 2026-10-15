@@ -52,6 +52,7 @@ export const updateShotSchema = z.object({
   line: z.string().max(500).optional(),
   subtitle: z.string().max(500).optional(),
   emotion: z.string().max(12).optional(),
+  sfx: z.string().max(60).optional(),
   character: z.string().max(100).optional(),
   voiceId: z.string().max(200).optional(),
   duration: z.number().int().min(1).max(60).optional(),

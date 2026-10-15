@@ -83,6 +83,7 @@ flowchart LR
 | **AI 视频生成** | 支持 Wan2.7-t2v / CogVideoX-3 等模型 |
 | **字幕烧录** | SRT → ASS，底部居中白色黑边，自动适配时长 |
 | **BGM 背景音乐** | 上传自定义音乐，可调节音量混入配音 |
+| **SFX 环境音效** | LLM 按镜头打音效标签，内置 ffmpeg 合成预设（雨/风/雷/心跳等）+ 自备音效库 `uploads/sfx-library/` |
 | **视频质量** | CRF 18, preset medium, yuv420p, 1080P |
 | **流畅拼接** | xfade 转场（自动降级为 simple concat）|
 
@@ -241,6 +242,7 @@ npx tsx scripts/full-pipeline.ts
 - [x] 角色参考图一致性（万相 2.7 多图参考 + 定妆照自动补建 + 一致性评分脚本）
 - [x] 声音复刻（CosyVoice Voice Enrollment，角色专属音色）
 - [x] 分镜编辑器 v1（单镜头文案编辑 + 生图/配音/视频按镜头重跑）
+- [x] SFX 环境音效（LLM 标签 + ffmpeg 合成预设 + 自备音效库）
 - [ ] 主角 LoRA / IP-Adapter 训练管线（90%+ 一致性档）
 - [ ] 批量创作模板
 - [ ] 竖屏模式 (9:16)

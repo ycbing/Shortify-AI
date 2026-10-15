@@ -25,6 +25,7 @@ export interface ShotEditFields {
   line?: string;
   subtitle?: string;
   emotion?: string;
+  sfx?: string;
   duration?: number;
 }
 
@@ -37,6 +38,7 @@ interface ShotCardProps {
   line?: string;
   subtitle?: string;
   emotion?: string;
+  sfx?: string;
   imageUrl?: string | null;
   aiVideoUrl?: string | null;
   aiVideoStatus?: ShotStatus;
@@ -55,6 +57,7 @@ export function ShotCard({
   line,
   subtitle,
   emotion,
+  sfx,
   imageUrl,
   aiVideoUrl,
   aiVideoStatus,
@@ -74,6 +77,7 @@ export function ShotCard({
       line: line || "",
       subtitle: subtitle || "",
       emotion: emotion || "",
+      sfx: sfx || "",
       duration,
     });
     setEditOpen(true);
@@ -87,6 +91,7 @@ export function ShotCard({
         visual: draft.visual?.trim() || visual,
         ...(type === "dialogue" ? { line: draft.line?.trim() || "" } : { subtitle: draft.subtitle?.trim() || "" }),
         emotion: draft.emotion?.trim() || "",
+        sfx: draft.sfx?.trim() || "",
         duration: draft.duration || duration,
       });
       if (ok !== false) setEditOpen(false);
@@ -138,6 +143,11 @@ export function ShotCard({
           {emotion && (
             <Badge variant="outline" className="text-[10px] bg-black/60 border-0 text-amber-300">
               {emotion}
+            </Badge>
+          )}
+          {sfx && (
+            <Badge variant="outline" className="text-[10px] bg-black/60 border-0 text-sky-300">
+              ♪ {sfx.split(/[,，;；]/)[0]}
             </Badge>
           )}
           {aiVideoUrl && (
@@ -311,6 +321,17 @@ export function ShotCard({
                   }
                 />
               </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor={`shot-sfx-${shotNumber}`}>环境音效（可选）</Label>
+              <Input
+                id={`shot-sfx-${shotNumber}`}
+                maxLength={60}
+                value={draft.sfx || ""}
+                onChange={(e) => setDraft({ ...draft, sfx: e.target.value })}
+                placeholder="如：rain / wind,door（可用：rain wind thunder fire water heartbeat clock tension traffic）"
+              />
             </div>
 
             <p className="text-[11px] text-muted-foreground">

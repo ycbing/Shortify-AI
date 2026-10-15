@@ -91,6 +91,7 @@ suspense(悬疑), romantic(浪漫), tense(紧张), calm(平静), dramatic(戏剧
           "type": "narration",
           "subtitle": "旁白或字幕文本",
           "emotion": "紧张",
+          "sfx": "rain",
           "bgm": "suspense"
         },
         {
@@ -130,6 +131,7 @@ suspense(悬疑), romantic(浪漫), tense(紧张), calm(平静), dramatic(戏剧
 - dialogue 类型的 shot 必须有 character（角色名）、line（台词）、voiceId（音色）
 - narration 类型的 shot 必须有 subtitle（字幕文本），不需要 voiceId
 - 每个 shot 必须有 "emotion" 字段（该镜头的情绪基调，8 字以内，从：平静/紧张/开心/悲伤/愤怒/惊讶/恐惧/温柔/兴奋/绝望 中选择或自拟），用于驱动语音合成的情感表达，需与台词内容和剧情相符
+- 每个 shot 建议有 "sfx" 字段（该镜头的环境音效标签，0~2 个，用英文逗号分隔），可用标签：rain(雨声)/wind(风声)/thunder(雷声)/fire(火焰)/water(水流)/heartbeat(心跳)/clock(钟表)/tension(紧张低频)/traffic(车流)。只选画面中真实存在或能增强氛围的，没有合适的就省略
 - 同一角色在所有镜头中的 voiceId 必须一致，appearance 描述也必须一致
 - **不同角色的 voiceId 必须互不相同**（两个角色同音色会让观众混淆），角色超过 7 个时允许旁白类配角复用音色
 - 每集至少 5-10 个 shots，总时长 30-60 秒

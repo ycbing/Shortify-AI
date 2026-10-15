@@ -31,7 +31,7 @@ import fs from "fs/promises";
 const log = createLogger("shot-regenerate-api");
 
 const EDITABLE_FIELDS = new Set([
-  "visual", "line", "subtitle", "emotion", "character", "voiceId", "duration",
+  "visual", "line", "subtitle", "emotion", "sfx", "character", "voiceId", "duration",
 ]);
 
 /**
@@ -158,7 +158,7 @@ export async function POST(request: NextRequest) {
         );
         const result = await generateVoiceover(
           text, outputPath, shot.voiceId || NARRATION_VOICE, "+0%", "+0Hz",
-          { emotion: shot.emotion }
+          { emotion: shot.emotion, sfx: shot.sfx }
         );
         voiceoverPath = result.filePath;
       } else {

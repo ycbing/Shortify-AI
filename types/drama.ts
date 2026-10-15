@@ -54,6 +54,8 @@ export interface Shot {
   subtitle?: string;
   /** 该镜头情绪基调（如 平静/紧张/开心/悲伤/惊讶），驱动 TTS 情感指令 */
   emotion?: string;
+  /** 音效标签（如 "rain" / "rain,door"），分号或逗号分隔，取第一个可解析项混入镜头配音 */
+  sfx?: string;
   bgm?: string;
   /** 分镜图 URL（COS/本地），storyboard 生成后写回 */
   imageUrl?: string;
