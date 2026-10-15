@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { StepIndicator } from "@/components/create/step-indicator";
 import { ShotCard } from "@/components/drama/shot-card";
-import { Loader2, ArrowRight, ArrowLeft, ImageIcon, ChevronDown, ChevronUp, Film, Square } from "lucide-react";
+import { Loader2, ArrowRight, ArrowLeft, ImageIcon, ChevronDown, ChevronUp, Film, Square, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { useTaskPolling } from "@/lib/hooks/use-task-polling";
@@ -62,6 +62,7 @@ export default function StoryboardPageContent() {
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [taskProgressLabel, setTaskProgressLabel] = useState("");
   const [taskDoneMsg, setTaskDoneMsg] = useState("分镜生成完成");
+  const [annotating, setAnnotating] = useState<number | "all" | null>(null);
 
   const toPublicUrl = (p: string | null | undefined): string | null => {
     if (!p) return null;
@@ -244,6 +245,47 @@ export default function StoryboardPageContent() {
     }
   };
 
+  // ===== 分镜编辑器 v2：AI 批量补齐情绪/音效标注 =====
+  const handleAnnotate = async (episodeNumber?: number) => {
+    if (!dramaId) return;
+    const ep =
+      episodeNumber !== undefined
+        ? items.find((i) => i.episodeNumber === episodeNumber)
+        : undefined;
+    if (episodeNumber !== undefined && !ep) return;
+
+    setAnnotating(episodeNumber ?? "all");
+    toast.info(
+      episodeNumber !== undefined
+        ? `第 ${episodeNumber} 集标注中...`
+        : "全剧标注中，完成后自动刷新..."
+    );
+
+    try {
+      const res = await fetch("/api/generate/shot-annotate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dramaId, ...(ep ? { episodeId: ep.id } : {}) }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error || "标注失败");
+        return;
+      }
+      if (data.taskId) {
+        setTaskDoneMsg("情绪/音效标注完成");
+        setActiveTaskId(data.taskId);
+        return;
+      }
+      await fetchEpisodes();
+      toast.success("标注完成，镜头卡片上可查看情绪与音效标签");
+    } catch {
+      toast.error("标注失败，请重试");
+    } finally {
+      setAnnotating(null);
+    }
+  };
+
   const handleCancelTask = async () => {
     if (!activeTaskId) return;
     try {
@@ -409,22 +451,39 @@ export default function StoryboardPageContent() {
             <h1 className="text-xl sm:text-2xl font-bold mb-1">AI 分镜 🎨</h1>
             <p className="text-xs sm:text-sm text-muted-foreground">每个镜头独立生成画面，支持 1080p 高清</p>
           </div>
-          <Button
-            onClick={handleGenerateAll}
-            disabled={generating}
-            className="bg-emerald-600 hover:bg-emerald-500 min-h-[44px] w-full sm:w-auto"
-          >
-            {generating ? (
-              <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                生成中 {generatingIndex >= 0 ? `(${generatingIndex + 1}/${totalCount})` : ""}...
-              </>
-            ) : items.every((i) => i.imageUrl) ? (
-              "重新生成全部"
-            ) : (
-              "生成全部分镜"
-            )}
-          </Button>
+          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+            <Button
+              onClick={() => handleAnnotate()}
+              disabled={generating || annotating !== null}
+              variant="outline"
+              className="min-h-[44px] w-full sm:w-auto"
+            >
+              {annotating === "all" ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  标注中...
+                </>
+              ) : (
+                "AI 补齐情绪/音效"
+              )}
+            </Button>
+            <Button
+              onClick={handleGenerateAll}
+              disabled={generating || annotating !== null}
+              className="bg-emerald-600 hover:bg-emerald-500 min-h-[44px] w-full sm:w-auto"
+            >
+              {generating ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  生成中 {generatingIndex >= 0 ? `(${generatingIndex + 1}/${totalCount})` : ""}...
+                </>
+              ) : items.every((i) => i.imageUrl) ? (
+                "重新生成全部"
+              ) : (
+                "生成全部分镜"
+              )}
+            </Button>
+          </div>
         </div>
 
         {error && (
@@ -546,6 +605,25 @@ export default function StoryboardPageContent() {
                 {/* Expanded shot cards */}
                 {isExpanded && shots.length > 0 && (
                   <div className="border-t border-border/50 p-3 sm:p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-[11px] text-muted-foreground">
+                        每个镜头可编辑文案并单独重跑生图/配音/视频
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground"
+                        onClick={() => handleAnnotate(item.episodeNumber)}
+                        disabled={annotating !== null || generating}
+                      >
+                        {annotating === item.episodeNumber ? (
+                          <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                        ) : (
+                          <Sparkles className="h-3 w-3 mr-1" />
+                        )}
+                        AI 标注本集
+                      </Button>
+                    </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                       {shots.map((shot) => (
                         <ShotCard

@@ -11,7 +11,7 @@ import { createLogger } from "@/lib/logger";
 
 const log = createLogger("script-gen");
 
-const GENRE_MAP: Record<DramaGenreType, string> = {
+export const GENRE_MAP: Record<DramaGenreType, string> = {
   mystery: "悬疑",
   romance: "爱情",
   comedy: "喜剧",
