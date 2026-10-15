@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { dramas, episodes } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { getOwnedDrama } from "@/lib/dramas";
 import { PUBLIC_DRAMA_STATUSES } from "@/lib/public-dramas";
+import { normalizeShotData } from "@/types/drama";
 import { createLogger } from "@/lib/logger";
 
 const log = createLogger("dramas-api");
@@ -105,11 +106,31 @@ export async function PUT(
           .where(eq(dramas.id, dramaId));
       }
 
+      // 剧集定位：剧本页提交 { episodeNumber, shots }，分镜页提交 { id, shotData }。
+      // 两种都要支持，且必须把 id 限定在本作品内（避免用他人 episodeId 越权写入）。
+      const ownedEpisodes = await db
+        .select({ id: episodes.id, episodeNumber: episodes.episodeNumber })
+        .from(episodes)
+        .where(eq(episodes.dramaId, dramaId));
+      const ownedIds = new Set(ownedEpisodes.map((e) => e.id));
+      const idByNumber = new Map(ownedEpisodes.map((e) => [e.episodeNumber, e.id]));
+
       for (const ep of episodesData) {
-        if (!ep.id) continue;
+        const episodeId: string | undefined =
+          typeof ep.id === "string" && ownedIds.has(ep.id)
+            ? ep.id
+            : typeof ep.episodeNumber === "number"
+              ? idByNumber.get(ep.episodeNumber)
+              : undefined;
+        if (!episodeId) continue;
 
         const updates: Record<string, unknown> = {};
         for (const key of Object.keys(ep)) {
+          if (key === "shots") {
+            // 剧本页用 `shots` 提交，落库字段是 shotData；顺带归一化镜头语言
+            if (Array.isArray(ep.shots)) updates.shotData = normalizeShotData(ep.shots);
+            continue;
+          }
           if (ALLOWED_EPISODE_FIELDS.has(key) && ep[key] !== undefined) {
             updates[key] = ep[key];
           }
@@ -119,7 +140,7 @@ export async function PUT(
           await db
             .update(episodes)
             .set(updates)
-            .where(eq(episodes.id, ep.id));
+            .where(and(eq(episodes.id, episodeId), eq(episodes.dramaId, dramaId)));
         }
       }
 

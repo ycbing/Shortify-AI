@@ -33,6 +33,11 @@ interface StoryboardItem {
     subtitle?: string;
     emotion?: string;
     sfx?: string;
+    shotSize?: string;
+    cameraAngle?: string;
+    cameraMove?: string;
+    lighting?: string;
+    transition?: string;
     imageUrl?: string | null;
     aiVideoUrl?: string | null;
   }>;
@@ -331,7 +336,19 @@ export default function StoryboardPageContent() {
   const handleEditShot = async (
     episodeNumber: number,
     shotNumber: number,
-    fields: { visual?: string; line?: string; subtitle?: string; emotion?: string; sfx?: string; duration?: number }
+    fields: {
+      visual?: string;
+      line?: string;
+      subtitle?: string;
+      emotion?: string;
+      sfx?: string;
+      duration?: number;
+      shotSize?: string;
+      cameraAngle?: string;
+      cameraMove?: string;
+      lighting?: string;
+      transition?: string;
+    }
   ): Promise<boolean> => {
     const ep = items.find((i) => i.episodeNumber === episodeNumber);
     if (!dramaId || !ep) return false;
@@ -637,6 +654,11 @@ export default function StoryboardPageContent() {
                           subtitle={shot.subtitle}
                           emotion={shot.emotion}
                           sfx={shot.sfx}
+                          shotSize={shot.shotSize}
+                          cameraAngle={shot.cameraAngle}
+                          cameraMove={shot.cameraMove}
+                          lighting={shot.lighting}
+                          transition={shot.transition}
                           imageUrl={shot.imageUrl}
                           aiVideoUrl={shot.aiVideoUrl}
                           onEditSave={(fields) =>

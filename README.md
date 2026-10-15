@@ -79,14 +79,15 @@ flowchart LR
 ### 🎬 1080P 视频合成
 | 功能 | 说明 |
 |------|------|
-| **Ken Burns 运镜** | 10 种运镜效果（推近/拉远/左移/右移/聚焦/旋转等） |
-| **AI 视频生成** | 支持 Wan2.7-t2v / CogVideoX-3 等模型 |
+| **镜头语言（分镜级）** | 每个镜头带景别/机位/运镜/光线/转场；景别与机位写入生图提示词，运镜决定画面运动，转场逐镜头生效 |
+| **Ken Burns 运镜** | 固定机位（静止）+ 推近/拉远/左右平移/上下摇/跟随；无运镜字段的历史作品回退到按镜头序号轮换 |
+| **AI 视频生成** | 支持 Wan2.7-t2v / CogVideoX-3 等模型；画面描述 + 镜头语言写入提示词（台词仅作表情参考） |
 | **对口型 Lip-sync** | 对白镜头可选接入可灵 lip-sync，配音驱动口型（`KLING_LIPSYNC=true`，消耗可灵算力） |
 | **字幕烧录** | SRT → ASS，底部居中白色黑边，自动适配时长 |
 | **BGM 背景音乐** | 上传自定义音乐，可调节音量混入配音 |
 | **SFX 环境音效** | LLM 按镜头打音效标签，内置 ffmpeg 合成预设（雨/风/雷/心跳等）+ 自备音效库 `uploads/sfx-library/` |
 | **视频质量** | CRF 18, preset medium, yuv420p, 1080P |
-| **流畅拼接** | xfade 转场（自动降级为 simple concat）|
+| **逐镜头转场** | 每个 junction 独立转场（硬切/淡入淡出/黑场/白场/溶解/滑入/圆形展开）；`cut` 先统一编码参数再拼接，避免采样率不一致 |
 
 ### 📤 导出与分享
 - 腾讯云 COS 签名 URL → 一键下载
@@ -101,7 +102,7 @@ flowchart LR
 - 📱 **响应式设计**（移动端 + 桌面端完美适配）
 - 📊 **创作看板**（进度跟踪、管理作品）
 - 🗑️ **作品管理**（编辑/复制/删除）
-- ✂️ **分镜编辑器**：单镜头改文案/情绪/时长，按需重跑生图（1 积分）/ 配音 / AI 视频（20 积分）；AI 一键为全剧/单集批量补齐情绪与音效标注（老剧本无需重新生成即可升级）
+- ✂️ **分镜编辑器**：单镜头改文案/情绪/时长/**镜头语言（景别·机位·运镜·光线·转场）**，按需重跑生图（1 积分）/ 配音 / AI 视频（20 积分）；AI 一键为全剧/单集批量补齐情绪、音效与镜头语言标注（老剧本无需重新生成即可升级）
 
 ---
 
@@ -121,19 +122,25 @@ shortify-ai/
 │   └── share/                    # 公开分享页
 ├── lib/ai/                       # AI 核心引擎
 │   ├── glm-client.ts             #   智谱 GLM 调用
-│   ├── script-generator.ts       #   剧本生成
-│   ├── image-generator.ts        #   图片生成路由
+│   ├── script-generator.ts       #   剧本生成（含镜头语言字段）
+│   ├── shot-prompts.ts           #   分镜提示词组装（角色外貌 + 镜头语言）
+│   ├── shot-annotator.ts         #   存量分镜批量补齐情绪/音效/镜头语言
+│   ├── image-generator.ts        #   图片生成路由（多图参考角色一致性）
 │   ├── wan-image-generator.ts    #   阿里百炼生图
 │   ├── video-generator.ts        #   视频生成路由
 │   ├── wan-video-generator.ts    #   阿里百炼视频
-│   ├── voiceover-generator.ts    #   配音生成
-│   ├── xunfei-tts.ts            #   讯飞 TTS
+│   ├── voiceover-generator.ts    #   配音生成（CosyVoice 情感 → 讯飞 → Edge）
+│   ├── cosyvoice-tts.ts          #   CosyVoice 情感 TTS
+│   ├── cosyvoice-clone.ts        #   声音复刻（Voice Enrollment）
+│   ├── sfx-library.ts            #   音效标签解析与合成
+│   ├── kling-client.ts           #   可灵对口型（JWT 鉴权）
 │   ├── subtitle-generator.ts     #   字幕生成
-│   ├── video-composer.ts         #   FFmpeg 合成
+│   ├── video-composer.ts         #   FFmpeg 合成（运镜 + 逐镜头转场）
 │   ├── cos-storage.ts            #   腾讯云 COS
 │   └── model-resolver.ts         #   模型配置解析
 ├── scripts/                      # 独立运行脚本
 │   ├── full-pipeline.ts          #   全集一键生成
+│   ├── test-shot-language.ts     #   镜头语言/转场映射冒烟测试
 │   └── gen-pipeline.ts           #   分步生成
 ├── drizzle/                      # 数据库 Schema
 └── uploads/                      # 本地文件缓存
@@ -246,6 +253,7 @@ npx tsx scripts/full-pipeline.ts
 - [x] SFX 环境音效（LLM 标签 + ffmpeg 合成预设 + 自备音效库）
 - [x] 对口型 Lip-sync（可灵 lip-sync API，对白镜头配音驱动口型，失败自动退回）
 - [x] AI 批量标注（LLM 为存量分镜补齐情绪/音效标签，fill 模式不覆盖手改）
+- [x] 镜头语言（景别/机位/运镜/光线/转场 分镜级字段 + 剧本产出 + 批量标注 + 逐镜头转场合成）
 - [ ] 主角 LoRA / IP-Adapter 训练管线（90%+ 一致性档）
 - [ ] 批量创作模板
 - [ ] 竖屏模式 (9:16)

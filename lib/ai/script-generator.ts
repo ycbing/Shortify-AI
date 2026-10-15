@@ -7,6 +7,7 @@ import type {
   DramaGenreType,
   DramaStyleType,
 } from "@/types/drama";
+import { normalizeShotLanguage } from "@/types/drama";
 import { createLogger } from "@/lib/logger";
 
 const log = createLogger("script-gen");
@@ -71,6 +72,23 @@ ${STYLE_MAP[style]}：${STYLE_IMAGE_PROMPT[style]}
 ## BGM 类型
 suspense(悬疑), romantic(浪漫), tense(紧张), calm(平静), dramatic(戏剧性), happy(欢快)
 
+## 镜头语言（每个 shot 必填，决定画面电影感，极其重要）
+不要只写"画面里有什么"，必须像分镜师一样指定摄影机怎么拍。允许的取值（**只能填英文 key**）：
+
+- shotSize（景别）: wide(远景) / full(全景) / medium(中景) / close(近景) / close_up(特写) / extreme_close_up(大特写)
+- cameraAngle（机位）: eye_level(平视) / high_angle(俯视) / low_angle(仰视) / over_shoulder(过肩) / pov(主观) / aerial(航拍俯瞰) / dutch(倾斜)
+- cameraMove（运镜）: static(固定) / push_in(推近) / pull_out(拉远) / pan_left(向左平移) / pan_right(向右平移) / tilt_up(向上摇) / tilt_down(向下摇) / follow(跟随)
+- lighting（光线）: natural(自然光) / warm(暖光) / cool(冷光) / backlight(逆光) / neon(霓虹) / low_key(低调暗部)
+- transition（与上一镜头之间的转场，第一个镜头填 cut）: cut(硬切) / fade(淡入淡出) / fadeblack(黑场) / fadewhite(白场) / dissolve(溶解) / slideleft(左滑) / slideright(右滑) / circleopen(圆形展开)
+
+分镜规则：
+1. **景别要有节奏变化**：同一集内不要出现连续 3 个以上相同景别。交代环境用 wide/full，推进剧情用 medium，情绪爆发用 close/close_up，关键细节用 extreme_close_up
+2. **对话镜头用 close 或 close_up**，突出表情；两人对峙可用 over_shoulder
+3. **cameraMove 服务情绪**：紧张/压迫用 push_in，失落/收尾用 pull_out，交代空间用 pan_left/pan_right，普通对话用 static。**不要每个镜头都运动**，一集中 push_in 这类强调运镜不超过 2-3 次
+4. **lighting 服务氛围**：白天室内 natural/warm，悬疑冷峻 cool/low_key，反派或危险 low_key，都市夜景 neon，情绪转折 backlight
+5. **transition 服务节奏**：同一场景内连续对话用 cut（硬切最自然），时间/空间跳跃用 fade 或 fadeblack，回忆/闪回用 dissolve，强调反差用 fadeblack
+6. cameraAngle 用于表达权力关系：强势方 low_angle，弱势方 high_angle，眩晕不安 dutch
+
 ## JSON 输出格式
 
 {
@@ -92,7 +110,12 @@ suspense(悬疑), romantic(浪漫), tense(紧张), calm(平静), dramatic(戏剧
           "subtitle": "旁白或字幕文本",
           "emotion": "紧张",
           "sfx": "rain",
-          "bgm": "suspense"
+          "bgm": "suspense",
+          "shotSize": "wide",
+          "cameraAngle": "high_angle",
+          "cameraMove": "pan_right",
+          "lighting": "low_key",
+          "transition": "cut"
         },
         {
           "shotNumber": 2,
@@ -102,7 +125,12 @@ suspense(悬疑), romantic(浪漫), tense(紧张), calm(平静), dramatic(戏剧
           "character": "角色名（必须与 characters 中的一致）",
           "line": "角色台词",
           "voiceId": "longcheng（使用该角色的 voiceId）",
-          "emotion": "惊讶"
+          "emotion": "惊讶",
+          "shotSize": "close_up",
+          "cameraAngle": "eye_level",
+          "cameraMove": "push_in",
+          "lighting": "cool",
+          "transition": "cut"
         },
         {
           "shotNumber": 3,
@@ -112,7 +140,12 @@ suspense(悬疑), romantic(浪漫), tense(紧张), calm(平静), dramatic(戏剧
           "character": "另一角色名",
           "line": "角色台词",
           "voiceId": "longwan",
-          "emotion": "温柔"
+          "emotion": "温柔",
+          "shotSize": "medium",
+          "cameraAngle": "over_shoulder",
+          "cameraMove": "static",
+          "lighting": "warm",
+          "transition": "fade"
         }
       ]
     }
@@ -133,6 +166,8 @@ suspense(悬疑), romantic(浪漫), tense(紧张), calm(平静), dramatic(戏剧
 - 每个 shot 必须有 "emotion" 字段（该镜头的情绪基调，8 字以内，从：平静/紧张/开心/悲伤/愤怒/惊讶/恐惧/温柔/兴奋/绝望 中选择或自拟），用于驱动语音合成的情感表达，需与台词内容和剧情相符
 - 每个 shot 建议有 "sfx" 字段（该镜头的环境音效标签，0~2 个，用英文逗号分隔），可用标签：rain(雨声)/wind(风声)/thunder(雷声)/fire(火焰)/water(水流)/heartbeat(心跳)/clock(钟表)/tension(紧张低频)/traffic(车流)。只选画面中真实存在或能增强氛围的，没有合适的就省略
 - 同一角色在所有镜头中的 voiceId 必须一致，appearance 描述也必须一致
+- **每个 shot 必须包含 shotSize / cameraAngle / cameraMove / lighting / transition 五个字段**，取值只能来自上面「镜头语言」列出的英文 key。缺失任一字段视为不合格输出
+- 每个 shot 的 shotSize、cameraMove、lighting 不应与前一个镜头完全相同（有意为之的固定镜头除外）；transition 只有在场景/时间/情绪真正切换时才用非 cut
 - **不同角色的 voiceId 必须互不相同**（两个角色同音色会让观众混淆），角色超过 7 个时允许旁白类配角复用音色
 - 每集至少 5-10 个 shots，总时长 30-60 秒
 - **对话比例要求（极其重要）**: 每集的 shots 中，dialogue 类型必须占 60% 以上，narration 最多不超过 40%。用角色之间的对话推进剧情，避免大量旁白
@@ -162,13 +197,37 @@ suspense(悬疑), romantic(浪漫), tense(紧张), calm(平静), dramatic(戏剧
 
 请确保剧情引人入胜，每集都有冲突和悬念，角色对话自然有张力。`;
 
-  return chatCompletionJSON<GeneratedScriptV2>(
+  const script = await chatCompletionJSON<GeneratedScriptV2>(
     [
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
     ],
     { temperature: 0.8 }
   );
+
+  return normalizeScriptShotLanguage(script);
+}
+
+/**
+ * LLM 输出的镜头语言字段无法保证是合法 key（可能给中文标签或近似词），
+ * 落库前统一归一化；无法识别的字段直接丢弃，由合成器回退到默认运镜。
+ */
+export function normalizeScriptShotLanguage<T extends GeneratedScriptV2>(
+  script: T
+): T {
+  if (!script || !Array.isArray(script.episodes)) return script;
+  return {
+    ...script,
+    episodes: script.episodes.map((episode) => ({
+      ...episode,
+      shots: Array.isArray(episode.shots)
+        ? episode.shots.map((shot) => ({
+            ...shot,
+            ...normalizeShotLanguage(shot),
+          }))
+        : episode.shots,
+    })),
+  };
 }
 
 export function getStyleImagePrompt(style: DramaStyleType): string {

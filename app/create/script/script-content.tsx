@@ -8,7 +8,15 @@ import { ScriptEditor } from "@/components/drama/script-editor";
 import { CharacterRefPanel } from "@/components/drama/character-ref-panel";
 import { Loader2, ArrowRight, ArrowLeft, Sparkles, Users, Film, Square, Save, AlertCircle } from "lucide-react";
 import type { GeneratedEpisode, GeneratedScriptV2, Shot, Character } from "@/types/drama";
-import { isScriptV2, VOICE_OPTIONS } from "@/types/drama";
+import {
+  isScriptV2,
+  VOICE_OPTIONS,
+  SHOT_SIZE_OPTIONS,
+  CAMERA_ANGLE_OPTIONS,
+  CAMERA_MOVE_OPTIONS,
+  LIGHTING_OPTIONS,
+  SHOT_TRANSITION_OPTIONS,
+} from "@/types/drama";
 import Link from "next/link";
 import { useTaskPolling } from "@/lib/hooks/use-task-polling";
 
@@ -18,6 +26,15 @@ const steps = [
   { number: 3, title: "分镜" },
   { number: 4, title: "预览" },
 ];
+
+/** 镜头语言下拉的占位文案（未设置时显示字段名） */
+const SHOT_LANGUAGE_FIELD_LABELS: Record<string, string> = {
+  shotSize: "景别",
+  cameraAngle: "机位",
+  cameraMove: "运镜",
+  lighting: "光线",
+  transition: "转场",
+};
 
 // Animated typing dots component
 function TypingDots() {
@@ -521,6 +538,32 @@ export default function ScriptPageContent() {
                           </div>
                         </div>
                         <div className="space-y-2">
+                          <div className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground/70">
+                            <span className="uppercase">镜头语言</span>
+                            {([
+                              ["shotSize", SHOT_SIZE_OPTIONS],
+                              ["cameraAngle", CAMERA_ANGLE_OPTIONS],
+                              ["cameraMove", CAMERA_MOVE_OPTIONS],
+                              ["lighting", LIGHTING_OPTIONS],
+                              ["transition", SHOT_TRANSITION_OPTIONS],
+                            ] as const).map(([field, options]) => (
+                              <select
+                                key={field}
+                                value={(shot[field] as string) || ""}
+                                onChange={(e) =>
+                                  updateShot(episode.episodeNumber - 1, shotIdx, field, e.target.value)
+                                }
+                                className="bg-muted/50 border border-border/30 rounded px-1.5 py-0.5 text-[10px] text-foreground/80 focus:outline-none focus:border-emerald-500/50"
+                              >
+                                <option value="">{SHOT_LANGUAGE_FIELD_LABELS[field]}</option>
+                                {Object.entries(options).map(([key, text]) => (
+                                  <option key={key} value={key}>
+                                    {text}
+                                  </option>
+                                ))}
+                              </select>
+                            ))}
+                          </div>
                           <div>
                             <label className="text-[10px] text-muted-foreground/70 uppercase">画面描述</label>
                             <textarea

@@ -6,7 +6,7 @@ import { createWriteStream } from "fs";
 import https from "https";
 import http from "http";
 import { isCosUrl, cosKeyFromUrl, getSignedCosUrl } from "./cos-storage";
-import type { Shot, ShotAudio } from "@/types/drama";
+import type { Shot, ShotAudio, CameraMove, ShotTransition } from "@/types/drama";
 import { createLogger } from "@/lib/logger";
 
 const log = createLogger("video-composer");
@@ -61,6 +61,29 @@ const XFADE_MAP: Record<TransitionType, string> = {
 };
 
 /**
+ * 分镜 `shot.transition` → 合成器转场。
+ * 除 `cut`（硬切）外与 XFADE_MAP 的 key 一一对应。
+ */
+const SHOT_TRANSITION_TO_COMPOSER: Record<ShotTransition, TransitionType> = {
+  cut: "none",
+  fade: "fade",
+  fadeblack: "fadeblack",
+  fadewhite: "fadewhite",
+  dissolve: "dissolve",
+  slideleft: "slideleft",
+  slideright: "slideright",
+  circleopen: "circleopen",
+};
+
+/** 对外暴露：把分镜转场映射为合成器转场 */
+export function resolveShotTransition(
+  transition?: ShotTransition | string
+): TransitionType | undefined {
+  if (!transition) return undefined;
+  return SHOT_TRANSITION_TO_COMPOSER[transition as ShotTransition];
+}
+
+/**
  * Get the actual duration of a video file using ffprobe.
  */
 async function getClipDuration(filePath: string): Promise<number> {
@@ -75,15 +98,30 @@ async function getClipDuration(filePath: string): Promise<number> {
 }
 
 /**
+ * 二叉树（pair-wise）合并中，第 `pass` 轮里合并 block `i` 与 block `i+1` 时，
+ * 对应的原始 junction 序号。junction `k` 位于 clip `k` 与 clip `k+1` 之间。
+ *
+ * 第 `pass` 轮开始时每个 block 覆盖 `2^(pass-1)` 个原始 clip，
+ * 因此 block i 与 i+1 的交界在原始 clip `(i+1)*2^(pass-1)-1` 与 `(i+1)*2^(pass-1)` 之间。
+ */
+export function junctionIndexForMerge(pass: number, i: number): number {
+  return (i + 1) * 2 ** (pass - 1) - 1;
+}
+
+/**
  * Concatenate video clips with xfade transitions.
- * Processes clips pair by pair to build the final output.
+ * Processes clips pair by pair (binary tree merge) to build the final output.
+ *
+ * @param junctionTransitions 逐 junction 转场：index `k` 表示 clip k 与 clip k+1 之间的转场。
+ *   缺省或某项为 undefined 时回退到 `transition`。`"none"` 表示该 junction 硬切。
  */
 export async function concatWithXfade(
   clipPaths: string[],
   outputPath: string,
   transition: TransitionType = "fade",
   transitionDuration: number = 0.5,
-  tempDir: string
+  tempDir: string,
+  junctionTransitions?: (TransitionType | undefined)[]
 ): Promise<string> {
   if (clipPaths.length === 0) throw new Error("No clips to concat");
   if (clipPaths.length === 1) {
@@ -91,7 +129,13 @@ export async function concatWithXfade(
     return outputPath;
   }
 
-  if (transition === "none") {
+  // 提供了逐 junction 数组即启用逐镜头模式（即使全为 cut，也先统一编码参数再拼接，
+  // 避免不同来源镜头音频采样率/声道不一致时 `-c copy` 拼接出错）
+  const hasPerJunction = Array.isArray(junctionTransitions) && junctionTransitions.length > 0;
+  const junctionAt = (k: number): TransitionType =>
+    junctionTransitions?.[k] ?? transition;
+
+  if (transition === "none" && !hasPerJunction) {
     // Fallback to simple concat without transitions
     const concatListPath = path.join(tempDir, "concat-list.txt");
     const concatContent = clipPaths.map((p) => `file '${path.relative(tempDir, p)}'`).join("\n");
@@ -101,7 +145,6 @@ export async function concatWithXfade(
     return outputPath;
   }
 
-  const xfadeName = XFADE_MAP[transition] || "fade";
   const td = Math.max(0.3, Math.min(transitionDuration, 2)); // clamp 0.3-2s
 
   // Normalize all clips to uniform encoding first (h264, aac 44100 stereo)
@@ -130,10 +173,15 @@ export async function concatWithXfade(
 
       const clipA = currentPaths[i];
       const clipB = currentPaths[i + 1];
+      // 本轮合并 block i 与 i+1，换算成原始 clip 之间的 junction 序号
+      const junction = junctionAt(junctionIndexForMerge(pass, i));
       const durationA = await getClipDuration(clipA);
 
-      if (durationA <= td) {
- log.warn(`Clip A too short (${durationA.toFixed(1)}s) for xfade (${td}s), concatenating without transition`);
+      // 硬切，或 A 段时长不足以做转场：直接拼接（参数已统一，copy 安全）
+      if (junction === "none" || durationA <= td) {
+        if (junction !== "none") {
+          log.warn(`Clip A too short (${durationA.toFixed(1)}s) for xfade (${td}s), concatenating without transition`);
+        }
         const simpleOut = path.join(tempDir, `merge-pass${pass}-${nextPaths.length}.mp4`);
         const concatListPath = path.join(tempDir, `concat-pass${pass}-${nextPaths.length}.txt`);
         await fs.writeFile(concatListPath, `file '${path.relative(tempDir, clipA)}'\nfile '${path.relative(tempDir, clipB)}'`);
@@ -142,6 +190,7 @@ export async function concatWithXfade(
         continue;
       }
 
+      const xfadeName = XFADE_MAP[junction] || "fade";
       const offset = durationA - td;
       const mergeOut = path.join(tempDir, `merge-pass${pass}-${nextPaths.length}.mp4`);
 
@@ -236,6 +285,8 @@ type KenBurnsEffect = "zoom-in" | "zoom-out" | "pan-left" | "pan-right" | "pan-u
 /**
  * Pick a Ken Burns effect based on shot number for variety.
  * Alternating between different movements across shots.
+ *
+ * 仅在镜头没有 `cameraMove` 字段时作为兜底（历史数据兼容）。
  */
 function pickKenBurnsEffect(shotNumber: number): KenBurnsEffect {
   const effects: KenBurnsEffect[] = [
@@ -244,6 +295,35 @@ function pickKenBurnsEffect(shotNumber: number): KenBurnsEffect {
     "zoom-in-left", "pan-up", "zoom-out-right",
   ];
   return effects[(shotNumber - 1) % effects.length];
+}
+
+/**
+ * 运镜 → Ken Burns 效果。
+ * `static` 用 null 表示"不做任何运动"，需走 composeShotVideo 里的静止分支。
+ * follow 没有等价的纯缩放/平移表达，用带侧向偏移的推近近似。
+ */
+const CAMERA_MOVE_TO_KENBURNS: Record<CameraMove, KenBurnsEffect | null> = {
+  static: null,
+  push_in: "zoom-in",
+  pull_out: "zoom-out",
+  pan_left: "pan-left",
+  pan_right: "pan-right",
+  tilt_up: "pan-up",
+  tilt_down: "pan-down",
+  follow: "zoom-in-right",
+};
+
+/**
+ * 解析镜头应使用的运动效果。
+ * - 有合法 `cameraMove` → 按分镜意图运镜（static 返回 null）
+ * - 无 `cameraMove`（历史数据）→ 回退到按镜头序号轮换的旧行为
+ */
+export function resolveKenBurnsEffect(shot: Shot): KenBurnsEffect | null {
+  const move = shot.cameraMove as CameraMove | undefined;
+  if (move && Object.prototype.hasOwnProperty.call(CAMERA_MOVE_TO_KENBURNS, move)) {
+    return CAMERA_MOVE_TO_KENBURNS[move];
+  }
+  return pickKenBurnsEffect(shot.shotNumber);
 }
 
 /**
@@ -346,14 +426,18 @@ async function composeShotVideo(
     const fadeDuration = Math.min(0.5, duration * 0.15);
 
     // Use gentle zoom animation instead of zoompan (much smoother, no jitter)
-    const effect = pickKenBurnsEffect(shot.shotNumber);
+    const effect = resolveKenBurnsEffect(shot);
     let motionFilter: string;
     const targetRes = aspectRatio === "vertical" ? "1080x1920" : "1920x1080";
     const [tw, th] = targetRes.split("x").map(Number);
     const upscaleW = Math.round(tw * 1.1);
     const upscaleH = Math.round(th * 1.1);
 
-    switch (effect) {
+    if (effect === null) {
+      // 固定机位：只做等比缩放 + 补边，不加任何运动
+      motionFilter = `scale=${tw}:${th}:force_original_aspect_ratio=decrease,pad=${tw}:${th}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1`;
+    } else {
+      switch (effect) {
       case "zoom-in":
         motionFilter = `scale=${upscaleW}:${upscaleH}:flags=lanczos,zoompan=z='min(zoom+0.0008,1.15)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${Math.max(1, Math.ceil(duration * 30))}:s=${tw}x${th}:fps=30`;
         break;
@@ -372,9 +456,13 @@ async function composeShotVideo(
       case "pan-down":
         motionFilter = `scale=${upscaleW}:${upscaleH}:flags=lanczos,zoompan=z='1.08':x='iw/2-(iw/zoom/2)':y='on*((ih-ih/zoom)/${Math.max(1, Math.ceil(duration * 30))})':d=${Math.max(1, Math.ceil(duration * 30))}:s=${tw}x${th}:fps=30`;
         break;
+      case "zoom-in-right":
+        motionFilter = `scale=${upscaleW}:${upscaleH}:flags=lanczos,zoompan=z='min(zoom+0.0008,1.15)':x='2*iw/3-(iw/zoom/3)':y='ih/2-(ih/zoom/2)':d=${Math.max(1, Math.ceil(duration * 30))}:s=${tw}x${th}:fps=30`;
+        break;
       default:
         motionFilter = `scale=${upscaleW}:${upscaleH}:flags=lanczos,zoompan=z='min(zoom+0.0008,1.12)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${Math.max(1, Math.ceil(duration * 30))}:s=${tw}x${th}:fps=30`;
         break;
+      }
     }
 
     const filterComplex = `[0:v]${motionFilter},fade=t=in:st=0:d=${fadeDuration},fade=t=out:st=${Math.max(0, duration - fadeDuration)}:d=${fadeDuration}[v];[1:a]aformat=sample_rates=44100:channel_layouts=stereo[a]`;
@@ -480,6 +568,8 @@ export async function composeEpisodeFromShots(
   }
 
   const shotVideoPaths: string[] = [];
+  // 与 shotVideoPaths 一一对应的镜头（跳过的镜头不进入拼接，必须同步记录）
+  const clipShots: Shot[] = [];
 
   for (const shot of shots) {
     const audio = audioMap.get(shot.shotNumber);
@@ -501,6 +591,7 @@ export async function composeEpisodeFromShots(
     );
 
     shotVideoPaths.push(shotVideo);
+    clipShots.push(shot);
   }
 
   // Concat all shot videos
@@ -515,18 +606,32 @@ export async function composeEpisodeFromShots(
   const transition = options?.transition || "fade";
   const transitionDuration = options?.transitionDuration || 0.5;
 
+  // 逐 junction 转场：shot.transition 描述的是「进入该镜头」的转场，
+  // 因此 clip k 与 clip k+1 之间的转场取自 clipShots[k+1]。
+  const hasShotTransitions = clipShots.some((s) => s.transition);
+  const junctionTransitions = hasShotTransitions
+    ? clipShots.slice(1).map((s) => resolveShotTransition(s.transition))
+    : undefined;
+
   if (shotVideoPaths.length === 1) {
     // Just rename/copy the single file
     await fs.copyFile(shotVideoPaths[0], rawOutputPath);
-  } else if (transition !== "none") {
-    // Use xfade transitions between shots
-    log.info(`Concatenating ${shotVideoPaths.length} clips with ${transition} transition (${transitionDuration}s)`);
+  } else if (transition !== "none" || junctionTransitions) {
+    // Use xfade transitions between shots（逐镜头转场优先，缺省回退到全局 transition）
+    log.info(
+      `Concatenating ${shotVideoPaths.length} clips` +
+        (junctionTransitions
+          ? ` with per-shot transitions [${junctionTransitions.map((t) => t ?? transition).join(", ")}]`
+          : ` with ${transition} transition`) +
+        ` (${transitionDuration}s)`
+    );
     await concatWithXfade(
       shotVideoPaths,
       rawOutputPath,
       transition,
       transitionDuration,
-      tempDir
+      tempDir,
+      junctionTransitions
     );
   } else {
     // No transition — use original TS concat protocol

@@ -6,17 +6,20 @@ import { eq, and } from "drizzle-orm";
 import { getOwnedDrama } from "@/lib/dramas";
 import { updateShotSchema } from "@/lib/validation";
 import type { Shot } from "@/types/drama";
+import { applyShotUpdates } from "@/types/drama";
 import { createLogger } from "@/lib/logger";
 
 const log = createLogger("shot-api");
 
 const EDITABLE_FIELDS = new Set([
   "visual", "line", "subtitle", "emotion", "character", "voiceId", "duration",
+  // 镜头语言
+  "shotSize", "cameraAngle", "cameraMove", "lighting", "transition",
 ]);
 
 /**
  * PATCH /api/dramas/[dramaId]/episodes/[episodeId]/shots/[shotNumber]
- * 编辑单个镜头的文案（画面描述/台词/字幕/情绪/时长等），保存到 episode.shotData
+ * 编辑单个镜头的文案（画面描述/台词/字幕/情绪/镜头语言/时长等），保存到 episode.shotData
  */
 export async function PATCH(
   request: NextRequest,
@@ -63,11 +66,11 @@ export async function PATCH(
       return NextResponse.json({ error: `镜头 ${shotNumber} 不存在` }, { status: 404 });
     }
 
-    // 仅应用白名单字段
+    // 仅应用白名单字段；镜头语言/情绪/音效的空串表示清除（删除键而非存 ""）
     const updates = Object.fromEntries(
       Object.entries(parsed.data).filter(([k, v]) => EDITABLE_FIELDS.has(k) && v !== undefined)
     );
-    const updatedShot: Shot = { ...shots[idx], ...updates };
+    const updatedShot: Shot = applyShotUpdates(shots[idx], updates);
     const newShots = shots.map((s, i) => (i === idx ? updatedShot : s));
 
     await db

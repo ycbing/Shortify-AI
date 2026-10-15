@@ -24,6 +24,7 @@ import fs from "fs/promises";
 import { checkCredits, CREDIT_COSTS, requireCreditDeduction, refundCredits } from "@/lib/credits";
 import { execSync } from "child_process";
 import { findShotImage, mixAudioToShotVideo, tryLipSyncShotVideo } from "@/lib/ai/shot-assets";
+import { buildShotVideoPrompt } from "@/lib/ai/shot-prompts";
 import { getOwnedDrama } from "@/lib/dramas";
 import { updateDramaStatus } from "@/lib/drama-status";
 import {
@@ -364,8 +365,8 @@ async function processVideos(
           continue;
         }
 
-        // 3. Build prompt from shot data
-        const prompt = shot.subtitle || shot.line || shot.visual || "电影场景";
+        // 3. Build prompt from shot data（画面描述 + 镜头语言优先，台词仅作表情参考）
+        const prompt = buildShotVideoPrompt(shot);
         log.info("Generating AI video for shot", { episodeNumber: epNum, shotNumber: shot.shotNumber, prompt: prompt.substring(0, 50) });
 
         // 4. Build character reference for this shot

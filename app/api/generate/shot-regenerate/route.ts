@@ -10,7 +10,8 @@ import { uploadFileToCos, imageCosKey, aiVideoCosKey } from "@/lib/ai/cos-storag
 import { generateVoiceover } from "@/lib/ai/voiceover-generator";
 import { generateVideo, downloadVideo, imageToBase64 } from "@/lib/ai/video-generator";
 import {
-  buildAppearancePrompt,
+  buildShotImagePrompt,
+  buildShotVideoPrompt,
   buildShotCharacterRefs,
 } from "@/lib/ai/shot-prompts";
 import { findShotImage, mixAudioToShotVideo, tryLipSyncShotVideo } from "@/lib/ai/shot-assets";
@@ -22,7 +23,7 @@ import {
   getActiveGenerationTask,
   touchGenerationTaskHeartbeat,
 } from "@/lib/generation";
-import { NARRATION_VOICE } from "@/types/drama";
+import { NARRATION_VOICE, applyShotUpdates } from "@/types/drama";
 import type { Character, Shot } from "@/types/drama";
 import { createLogger } from "@/lib/logger";
 import path from "path";
@@ -32,6 +33,8 @@ const log = createLogger("shot-regenerate-api");
 
 const EDITABLE_FIELDS = new Set([
   "visual", "line", "subtitle", "emotion", "sfx", "character", "voiceId", "duration",
+  // 镜头语言
+  "shotSize", "cameraAngle", "cameraMove", "lighting", "transition",
 ]);
 
 /**
@@ -77,13 +80,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: `镜头 ${shotNumber} 不存在` }, { status: 404 });
     }
 
-    // 应用可选的文案修改（与 PATCH 路由同一白名单）
+    // 应用可选的文案修改（与 PATCH 路由同一白名单与清除语义）
     let shot: Shot = shots[idx];
     if (edited) {
       const updates = Object.fromEntries(
         Object.entries(edited).filter(([k, v]) => EDITABLE_FIELDS.has(k) && v !== undefined)
       );
-      shot = { ...shot, ...updates };
+      shot = applyShotUpdates(shot, updates);
     }
 
     const uploadDir = path.resolve(process.env.UPLOAD_DIR || "./uploads");
@@ -121,7 +124,8 @@ export async function POST(request: NextRequest) {
       for (const c of characters) {
         if (c.referenceImageUrl) refMap.set(c.name, c.referenceImageUrl);
       }
-      const enrichedPrompt = buildAppearancePrompt(shot, characters);
+      // 角色外貌（一致性）+ 画面描述 + 镜头语言（景别/机位/光线）
+      const enrichedPrompt = buildShotImagePrompt(shot, characters);
       const characterReferences = buildShotCharacterRefs(shot, characters, refMap);
 
       const generatedUrl = await generateImage(
@@ -272,7 +276,8 @@ async function processShotVideoRegeneration({
       throw new Error("镜头无分镜图，请先生成或重跑图片");
     }
     const base64DataUrl = await imageToBase64(imgPath);
-    const prompt = shot.subtitle || shot.line || shot.visual || "电影场景";
+    // 画面描述 + 镜头语言优先，台词仅作表情参考（避免台词文本驱动画面运动）
+    const prompt = buildShotVideoPrompt(shot);
 
     const result = await generateVideo(prompt, base64DataUrl, style, { userId });
     await touchGenerationTaskHeartbeat(taskId, {

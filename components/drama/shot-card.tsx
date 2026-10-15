@@ -16,11 +16,30 @@ import {
   X,
   Pencil,
   AudioLines,
+  Camera,
 } from "lucide-react";
+import {
+  SHOT_SIZE_OPTIONS,
+  CAMERA_ANGLE_OPTIONS,
+  CAMERA_MOVE_OPTIONS,
+  LIGHTING_OPTIONS,
+  SHOT_TRANSITION_OPTIONS,
+  describeShotLanguage,
+  labelOf,
+} from "@/types/drama";
 
 export type ShotStatus = "pending" | "generating" | "ready" | "error";
 
-export interface ShotEditFields {
+/** 镜头语言字段（与 lib/validation.ts 的 updateShotSchema 对齐） */
+export interface ShotLanguageFields {
+  shotSize?: string;
+  cameraAngle?: string;
+  cameraMove?: string;
+  lighting?: string;
+  transition?: string;
+}
+
+export interface ShotEditFields extends ShotLanguageFields {
   visual?: string;
   line?: string;
   subtitle?: string;
@@ -29,7 +48,7 @@ export interface ShotEditFields {
   duration?: number;
 }
 
-interface ShotCardProps {
+interface ShotCardProps extends ShotLanguageFields {
   shotNumber: number;
   visual: string;
   duration: number;
@@ -48,6 +67,45 @@ interface ShotCardProps {
   onEditSave?: (fields: ShotEditFields) => Promise<boolean> | void;
 }
 
+/** 镜头语言下拉：选项直接来自 types/drama.ts 的选项表，避免两处维护 */
+function LanguageSelect({
+  id,
+  label,
+  hint,
+  value,
+  options,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  hint?: string;
+  value?: string;
+  options: Record<string, string>;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={id} className="text-xs">
+        {label}
+        {hint ? <span className="ml-1 text-[10px] text-muted-foreground/70">{hint}</span> : null}
+      </Label>
+      <select
+        id={id}
+        value={value || ""}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full h-9 rounded-md border border-border/50 bg-muted/30 px-2 text-sm focus:outline-none focus:border-emerald-500/50"
+      >
+        <option value="">未设置（按镜头序号自动运镜）</option>
+        {Object.entries(options).map(([key, text]) => (
+          <option key={key} value={key}>
+            {text}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 export function ShotCard({
   shotNumber,
   visual,
@@ -58,6 +116,11 @@ export function ShotCard({
   subtitle,
   emotion,
   sfx,
+  shotSize,
+  cameraAngle,
+  cameraMove,
+  lighting,
+  transition,
   imageUrl,
   aiVideoUrl,
   aiVideoStatus,
@@ -79,6 +142,11 @@ export function ShotCard({
       emotion: emotion || "",
       sfx: sfx || "",
       duration,
+      shotSize: shotSize || "",
+      cameraAngle: cameraAngle || "",
+      cameraMove: cameraMove || "",
+      lighting: lighting || "",
+      transition: transition || "",
     });
     setEditOpen(true);
   };
@@ -93,12 +161,30 @@ export function ShotCard({
         emotion: draft.emotion?.trim() || "",
         sfx: draft.sfx?.trim() || "",
         duration: draft.duration || duration,
+        shotSize: draft.shotSize || "",
+        cameraAngle: draft.cameraAngle || "",
+        cameraMove: draft.cameraMove || "",
+        lighting: draft.lighting || "",
+        transition: draft.transition || "",
       });
       if (ok !== false) setEditOpen(false);
     } finally {
       setSaving(false);
     }
   };
+
+  /** 缩略图角标只放最直观的两项：景别 + 运镜 */
+  const primaryLanguage = [
+    labelOf(SHOT_SIZE_OPTIONS, shotSize),
+    labelOf(CAMERA_MOVE_OPTIONS, cameraMove),
+  ].filter(Boolean) as string[];
+  const languageSummary = describeShotLanguage({
+    shotSize,
+    cameraAngle,
+    cameraMove,
+    lighting,
+    transition,
+  });
 
   return (
     <div className="border border-border/50 rounded-lg overflow-hidden bg-card/50 hover:border-emerald-500/30 transition-all group">
@@ -131,13 +217,19 @@ export function ShotCard({
         )}
 
         {/* Badges */}
-        <div className="absolute top-2 left-2 flex items-center gap-1">
+        <div className="absolute top-2 left-2 right-2 flex items-center gap-1 flex-wrap">
           <Badge variant="outline" className="text-[10px] bg-black/60 border-0 text-white">
             #{shotNumber}
           </Badge>
           {type === "dialogue" && character && (
             <Badge variant="outline" className="text-[10px] bg-black/60 border-0 text-emerald-300">
               {character}
+            </Badge>
+          )}
+          {primaryLanguage.length > 0 && (
+            <Badge variant="outline" className="text-[10px] bg-black/60 border-0 text-indigo-300">
+              <Camera className="h-2.5 w-2.5 mr-0.5" />
+              {primaryLanguage.join(" · ")}
             </Badge>
           )}
           {emotion && (
@@ -196,6 +288,12 @@ export function ShotCard({
           <p className="text-[11px] text-muted-foreground mt-1 leading-relaxed line-clamp-3">
             {visual}
           </p>
+          {languageSummary.length > 0 && (
+            <p className="text-[10px] text-indigo-300/80 mt-1.5 flex items-center gap-1 flex-wrap">
+              <Camera className="h-2.5 w-2.5" />
+              {languageSummary.join(" · ")}
+            </p>
+          )}
         </details>
 
         {/* Actions */}
@@ -332,6 +430,58 @@ export function ShotCard({
                 onChange={(e) => setDraft({ ...draft, sfx: e.target.value })}
                 placeholder="如：rain / wind,door（可用：rain wind thunder fire water heartbeat clock tension traffic）"
               />
+            </div>
+
+            {/* 镜头语言 */}
+            <div className="space-y-3 rounded-lg border border-border/40 p-3">
+              <div className="flex items-center gap-1.5 text-xs font-medium">
+                <Camera className="h-3.5 w-3.5 text-indigo-400" />
+                镜头语言
+                <span className="text-[10px] font-normal text-muted-foreground/70">
+                  决定画面取景与运镜，保存后重新生图/生成视频才生效
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <LanguageSelect
+                  id={`shot-size-${shotNumber}`}
+                  label="景别"
+                  value={draft.shotSize}
+                  options={SHOT_SIZE_OPTIONS}
+                  onChange={(v) => setDraft({ ...draft, shotSize: v })}
+                />
+                <LanguageSelect
+                  id={`shot-angle-${shotNumber}`}
+                  label="机位"
+                  value={draft.cameraAngle}
+                  options={CAMERA_ANGLE_OPTIONS}
+                  onChange={(v) => setDraft({ ...draft, cameraAngle: v })}
+                />
+                <LanguageSelect
+                  id={`shot-move-${shotNumber}`}
+                  label="运镜"
+                  value={draft.cameraMove}
+                  options={CAMERA_MOVE_OPTIONS}
+                  onChange={(v) => setDraft({ ...draft, cameraMove: v })}
+                />
+                <LanguageSelect
+                  id={`shot-lighting-${shotNumber}`}
+                  label="光线"
+                  value={draft.lighting}
+                  options={LIGHTING_OPTIONS}
+                  onChange={(v) => setDraft({ ...draft, lighting: v })}
+                />
+                <LanguageSelect
+                  id={`shot-transition-${shotNumber}`}
+                  label="转场"
+                  hint="与上一镜头之间"
+                  value={draft.transition}
+                  options={SHOT_TRANSITION_OPTIONS}
+                  onChange={(v) => setDraft({ ...draft, transition: v })}
+                />
+              </div>
+              <p className="text-[10px] text-muted-foreground/70">
+                「固定机位」出静止画面；推近/拉远/平移/摇镜会作用于静态分镜图，并写入 AI 视频提示词。
+              </p>
             </div>
 
             <p className="text-[11px] text-muted-foreground">

@@ -25,7 +25,7 @@ import { tryAcquireUserSlot, releaseUserSlot, getUserActiveCount } from "@/lib/r
 import { createLogger } from "@/lib/logger";
 import { storyboardSchema } from "@/lib/validation";
 import {
-  buildAppearancePrompt,
+  buildShotImagePrompt,
   findCharactersInShot,
   buildShotCharacterRefs,
 } from "@/lib/ai/shot-prompts";
@@ -452,7 +452,8 @@ async function handleShotStoryboard(
       await new Promise((resolve) => setTimeout(resolve, 1200));
     }
     try {
-      const enrichedPrompt = buildAppearancePrompt(shot, characters);
+      // 角色外貌（一致性）+ 画面描述 + 镜头语言（景别/机位/光线）
+      const enrichedPrompt = buildShotImagePrompt(shot, characters);
 
       const characterReferences = buildShotCharacterRefs(shot, characters, refMap);
 
