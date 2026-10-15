@@ -9,6 +9,13 @@ import {
   isXunfeiConfigured,
   mapVoiceId,
 } from "@/lib/ai/xunfei-tts";
+import {
+  cosyVoiceTts,
+  isCosyVoiceConfigured,
+  toCosyVoiceVoice,
+  toEdgeVoice,
+  buildEmotionInstruction,
+} from "@/lib/ai/cosyvoice-tts";
 import { withRetry } from "@/lib/resilience";
 import { createLogger } from "@/lib/logger";
 
@@ -22,14 +29,20 @@ export interface VoiceoverResult {
   text: string;
 }
 
-// ============ Core TTS function (iFlytek → Edge-TTS fallback) ============
+export interface GenerateVoiceoverOptions {
+  /** 情感标签（紧张/开心/悲伤…），仅 CosyVoice 支持，驱动情感指令 */
+  emotion?: string;
+}
+
+// ============ Core TTS function (CosyVoice → iFlytek → Edge-TTS fallback) ============
 
 export async function generateVoiceover(
   text: string,
   outputPath: string,
   voice: string = "zh-CN-XiaoxiaoNeural",
   rate: string = "+0%",
-  pitch: string = "+0Hz"
+  pitch: string = "+0Hz",
+  options?: GenerateVoiceoverOptions
 ): Promise<VoiceoverResult> {
   if (!text) {
     throw new Error("generateVoiceover: text is empty");
@@ -37,10 +50,28 @@ export async function generateVoiceover(
   const dir = path.dirname(outputPath);
   await fs.mkdir(dir, { recursive: true });
 
-  // Prefer iFlytek (commercial, stable)
+  // Prefer CosyVoice (百炼，支持情感指令，与生图/生视频同一 API Key)
+  if (isCosyVoiceConfigured()) {
+    try {
+      await cosyVoiceTts(text, outputPath, {
+        voice: toCosyVoiceVoice(voice),
+        instruction: buildEmotionInstruction(options?.emotion),
+      });
+      const duration = await getAudioDuration(outputPath, text.length);
+      return { filePath: outputPath, durationSeconds: duration, text };
+    } catch (err) {
+      log.warn("CosyVoice TTS failed, falling back", {
+        voice,
+        emotion: options?.emotion || "-",
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  // Then iFlytek (commercial, stable)
   if (isXunfeiConfigured()) {
     try {
-      const xfyVoice = mapVoiceId(voice);
+      const xfyVoice = mapVoiceId(toEdgeVoice(voice));
       return await withRetry(
         () => xunfeiTts(text, outputPath, xfyVoice),
         {
@@ -63,7 +94,8 @@ export async function generateVoiceover(
 
   // Fallback: Edge-TTS (with retry)
   const escapedText = text.replace(/"/g, '\\"').replace(/\n/g, " ");
-  const cmd = `edge-tts --voice "${voice}" --rate="${rate}" --pitch="${pitch}" --text "${escapedText}" --write-media "${outputPath}"`;
+  const edgeVoice = toEdgeVoice(voice);
+  const cmd = `edge-tts --voice "${edgeVoice}" --rate="${rate}" --pitch="${pitch}" --text "${escapedText}" --write-media "${outputPath}"`;
 
   try {
     await withRetry(() => execAsync(cmd, { timeout: 60000 }), {
@@ -71,14 +103,14 @@ export async function generateVoiceover(
       baseDelayMs: 3000,
       onRetry: (attempt, err, delayMs) => {
         log.warn(`Edge-TTS retry ${attempt} after ${Math.round(delayMs)}ms`, {
-          voice,
+          voice: edgeVoice,
           error: err instanceof Error ? err.message : String(err),
         });
       },
     });
   } catch (err) {
     log.error(`Voiceover generation failed after retries`, {
-      voice,
+      voice: edgeVoice,
       textLength: text.length,
       error: err instanceof Error ? err.message : String(err),
     });
@@ -149,7 +181,9 @@ export async function generateShotVoiceovers(
     }
 
     try {
-      const result = await generateVoiceover(text, outputPath, voiceId);
+      const result = await generateVoiceover(text, outputPath, voiceId, "+0%", "+0Hz", {
+        emotion: shot.emotion,
+      });
       results.push({
         shotNumber: shot.shotNumber,
         audioUrl: result.filePath,

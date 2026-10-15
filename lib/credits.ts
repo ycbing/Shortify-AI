@@ -19,6 +19,8 @@ export const CREDIT_COSTS = {
   video: 20,         // AI 视频生成（每个镜头）
   narration: 5,      // 短视频解说生成
   characterReference: 1,  // 角色参考图生成
+  voiceClone: 2,     // 角色声音复刻（CosyVoice Voice Enrollment）
+  shotImage: 1,      // 单镜头重新生图（分镜编辑器）
 } as const;
 
 export type CreditType = keyof typeof CREDIT_COSTS;
@@ -32,6 +34,8 @@ export const CREDIT_LABELS: Record<CreditType, string> = {
   video: "AI 视频生成",
   narration: "短视频解说",
   characterReference: "角色参考图生成",
+  voiceClone: "角色声音复刻",
+  shotImage: "单镜头重新生图",
 };
 
 /**

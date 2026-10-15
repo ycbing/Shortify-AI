@@ -24,107 +24,13 @@ import {
 import { tryAcquireUserSlot, releaseUserSlot, getUserActiveCount } from "@/lib/resilience";
 import { createLogger } from "@/lib/logger";
 import { storyboardSchema } from "@/lib/validation";
+import {
+  buildAppearancePrompt,
+  findCharactersInShot,
+  buildShotCharacterRefs,
+} from "@/lib/ai/shot-prompts";
 
 const log = createLogger("storyboard-api");
-
-/**
- * Build appearance-enriched prompt for a shot.
- * If the shot references a character and that character has an appearance,
- * prepend the appearance description to the visual prompt.
- */
-function buildAppearancePrompt(
-  shot: Shot,
-  characters: Character[]
-): string {
-  if (!shot.visual) return shot.visual || "";
-
-  // Find character appearances to include
-  const referencedCharacters: Character[] = [];
-
-  if (shot.type === "dialogue" && shot.character) {
-    const char = characters.find(
-      (c) => c.name === shot.character
-    );
-    if (char) referencedCharacters.push(char);
-  }
-
-  // Also try to find characters mentioned by name in the visual text
-  for (const char of characters) {
-    if (
-      char.appearance &&
-      !referencedCharacters.includes(char) &&
-      shot.visual.includes(char.name)
-    ) {
-      referencedCharacters.push(char);
-    }
-  }
-
-  if (referencedCharacters.length === 0) {
-    return shot.visual;
-  }
-
-  // Prepend character appearances
-  const appearanceDescs = referencedCharacters
-    .filter((c) => c.appearance)
-    .map((c) => c.appearance)
-    .join("。");
-
-  if (!appearanceDescs) return shot.visual;
-
-  return `${appearanceDescs}。${shot.visual}`;
-}
-
-/**
- * Find characters referenced in a shot by dialogue or visual description.
- */
-function findCharactersInShot(
-  shot: Shot,
-  characters: Character[]
-): Character[] {
-  const found: Character[] = [];
-
-  if (shot.type === "dialogue" && shot.character) {
-    const char = characters.find((c) => c.name === shot.character);
-    if (char) found.push(char);
-  }
-
-  for (const char of characters) {
-    if (
-      !found.includes(char) &&
-      char.name &&
-      shot.visual?.includes(char.name)
-    ) {
-      found.push(char);
-    }
-  }
-
-  return found;
-}
-
-/**
- * Build character reference list for Kling API from the refMap.
- */
-function buildShotCharacterRefs(
-  shot: Shot,
-  characters: Character[],
-  refMap: Map<string, string>
-): { imageUrl: string; type: "face" | "full_body"; characterName: string }[] {
-  const refs: { imageUrl: string; type: "face" | "full_body"; characterName: string }[] = [];
-  const shotChars = findCharactersInShot(shot, characters);
-
-  for (const c of shotChars) {
-    const refUrl = refMap.get(c.name);
-    if (refUrl) {
-      refs.push({
-        imageUrl: refUrl,
-        type: "face",
-        characterName: c.name,
-      });
-    }
-  }
-
-  return refs;
-}
 
 export async function POST(request: NextRequest) {
   let taskId: string | null = null;
@@ -536,10 +442,8 @@ async function handleShotStoryboard(
   const shots = episode.shotData as unknown as Shot[];
   const shotImages: { shotNumber: number; imageUrl: string }[] = [];
 
-  // 自动为缺少参考图的角色生成参考图（只在第一集触发）
-  if (episode.episodeNumber === 1) {
-    await autoGenerateMissingReferences(characters, refMap, style || "realistic", dramaId);
-  }
+  // 自动为缺少参考图的角色生成参考图（所有集数都检查；参考图齐全时为零开销）
+  await autoGenerateMissingReferences(characters, refMap, style || "realistic", dramaId);
 
   for (let i = 0; i < shots.length; i++) {
     const shot = shots[i];

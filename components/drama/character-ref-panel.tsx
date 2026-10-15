@@ -2,9 +2,14 @@
 
 import { useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import { Loader2, RefreshCw, Check, User, Camera, SkipForward } from "lucide-react";
+import { Loader2, RefreshCw, Check, User, Camera, SkipForward, Mic } from "lucide-react";
 import { toast } from "sonner";
+import { VOICE_OPTIONS } from "@/types/drama";
 import type { Character } from "@/types/drama";
+
+const VOICE_LABEL_BY_ID = Object.fromEntries(
+  Object.entries(VOICE_OPTIONS).map(([label, id]) => [id as string, label])
+);
 
 interface CharacterRefPanelProps {
   dramaId: string;
@@ -19,6 +24,7 @@ export function CharacterRefPanel({
 }: CharacterRefPanelProps) {
   const [characters, setCharacters] = useState<Character[]>(initialCharacters);
   const [generating, setGenerating] = useState<string | "all" | null>(null);
+  const [cloning, setCloning] = useState<string | null>(null);
   const [skipped, setSkipped] = useState(false);
 
   const toPublicUrl = (url: string | null | undefined): string | null => {
@@ -158,6 +164,43 @@ export function CharacterRefPanel({
     toast.info("已跳过，AI 将使用提示词进行角色一致性");
   };
 
+  // 声音复刻：上传 10~20 秒人声样本，为角色生成专属音色
+  const handleVoiceClone = useCallback(
+    async (charName: string, file: File) => {
+      if (!dramaId) return;
+      setCloning(charName);
+      try {
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = () => reject(new Error("读取文件失败"));
+          reader.readAsDataURL(file);
+        });
+        const res = await fetch("/api/generate/voice-clone", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ dramaId, characterName: charName, audio: dataUrl }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          toast.error(data.error || `复刻 ${charName} 音色失败`);
+          return;
+        }
+        const updated = characters.map((c) =>
+          c.name === charName ? { ...c, voiceId: data.voiceId } : c
+        );
+        setCharacters(updated);
+        onCharactersUpdate(updated);
+        toast.success(`${charName} 专属音色已生成，重新生成配音后生效`);
+      } catch {
+        toast.error("声音复刻失败，请重试");
+      } finally {
+        setCloning(null);
+      }
+    },
+    [dramaId, characters, onCharactersUpdate]
+  );
+
   // 跳过后不显示
   if (skipped) return null;
 
@@ -230,12 +273,12 @@ export function CharacterRefPanel({
                 </p>
 
                 {/* 操作按钮 */}
-                <div className="mt-2">
+                <div className="mt-2 space-y-2">
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={() => handleGenerateOne(char.name)}
-                    disabled={!!generating}
+                    disabled={!!generating || cloning !== null}
                     className="w-full h-8 text-xs"
                   >
                     {isGeneratingThis ? (
@@ -247,6 +290,46 @@ export function CharacterRefPanel({
                     )}
                     {refUrl ? "重新生成" : "生成参考图"}
                   </Button>
+
+                  {/* 声音复刻 */}
+                  <input
+                    type="file"
+                    accept="audio/*"
+                    className="hidden"
+                    id={`voice-sample-${char.name}`}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) handleVoiceClone(char.name, f);
+                      e.target.value = "";
+                    }}
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      document.getElementById(`voice-sample-${char.name}`)?.click()
+                    }
+                    disabled={cloning !== null || generating !== null}
+                    className="w-full h-8 text-xs"
+                  >
+                    {cloning === char.name ? (
+                      <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                    ) : (
+                      <Mic className="h-3 w-3 mr-1" />
+                    )}
+                    {char.voiceId?.startsWith("cosyvoice-")
+                      ? "重新复刻音色"
+                      : "复刻专属音色"}
+                  </Button>
+                  <p className="text-[10px] text-muted-foreground">
+                    音色：
+                    {char.voiceId?.startsWith("cosyvoice-")
+                      ? "专属复刻音色"
+                      : VOICE_LABEL_BY_ID[char.voiceId || ""] || "默认女声-温柔"}
+                    {char.voiceId?.startsWith("cosyvoice-")
+                      ? ""
+                      : "（上传 10~20 秒人声可复刻专属音色）"}
+                  </p>
                 </div>
               </div>
             </div>

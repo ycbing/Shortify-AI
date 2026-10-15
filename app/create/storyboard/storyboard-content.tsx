@@ -31,6 +31,7 @@ interface StoryboardItem {
     character?: string;
     line?: string;
     subtitle?: string;
+    emotion?: string;
     imageUrl?: string | null;
     aiVideoUrl?: string | null;
   }>;
@@ -59,6 +60,16 @@ export default function StoryboardPageContent() {
   const progressRef = useRef<HTMLDivElement>(null);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [taskProgressLabel, setTaskProgressLabel] = useState("");
+  const [taskDoneMsg, setTaskDoneMsg] = useState("分镜生成完成");
+
+  const toPublicUrl = (p: string | null | undefined): string | null => {
+    if (!p) return null;
+    if (p.includes(".cos.") && p.startsWith("http")) {
+      try { const u = new URL(p); return `/api/uploads/cos/${encodeURIComponent(u.pathname.slice(1))}`; } catch { return p; }
+    }
+    if (p.startsWith("http")) return p;
+    return `/api/uploads/${p.replace(/^\.?\/?uploads\/?/, "")}`;
+  };
 
   const fetchEpisodes = useCallback(async () => {
     if (!dramaId) return;
@@ -68,14 +79,6 @@ export default function StoryboardPageContent() {
       const res = await fetch(`/api/dramas/${dramaId}`);
       if (res.ok) {
         const data = await res.json();
-        const toPublicUrl = (p: string | null | undefined): string | null => {
-          if (!p) return null;
-          if (p.includes(".cos.") && p.startsWith("http")) {
-            try { const u = new URL(p); return `/api/uploads/cos/${encodeURIComponent(u.pathname.slice(1))}`; } catch { return p; }
-          }
-          if (p.startsWith("http")) return p;
-          return `/api/uploads/${p.replace(/^\.?\/?uploads\/?/, "")}`;
-        };
         setItems(
           data.episodes.map((ep: DramaEpisodeResponse) => ({
             id: ep.id,
@@ -108,7 +111,7 @@ export default function StoryboardPageContent() {
       setActiveTaskId(null);
       setTaskProgressLabel(task.presentation?.summary || "");
       await fetchEpisodes();
-      toast.success("分镜生成完成");
+      toast.success(taskDoneMsg);
     },
     onFailed: async (task) => {
       setGenerating(false);
@@ -180,7 +183,7 @@ export default function StoryboardPageContent() {
       setActiveTaskId(null);
       setTaskProgressLabel(task.presentation?.summary || "");
       await fetchEpisodes();
-      toast.success("分镜生成完成");
+      toast.success(taskDoneMsg);
     },
     onFailed: async (task) => {
       setGenerating(false);
@@ -240,27 +243,6 @@ export default function StoryboardPageContent() {
     }
   };
 
-  const handleRegenerate = async (episodeNumber: number) => {
-    if (!dramaId) return;
-    const ep = items.find((i) => i.episodeNumber === episodeNumber);
-    if (!ep) return;
-
-    try {
-      const res = await fetch("/api/generate/storyboard", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dramaId, episodeId: ep.id }),
-      });
-
-      if (res.ok) {
-        toast.success(`第 ${episodeNumber} 集分镜已重新生成`);
-        await fetchEpisodes();
-      }
-    } catch {
-      toast.error("重新生成失败");
-    }
-  };
-
   const handleCancelTask = async () => {
     if (!activeTaskId) return;
     try {
@@ -277,6 +259,105 @@ export default function StoryboardPageContent() {
       toast.success("分镜任务已取消");
     } catch {
       setError("取消任务失败");
+    }
+  };
+
+  // ===== 分镜编辑器：单镜头编辑与资源重跑 =====
+
+  type ShotView = NonNullable<StoryboardItem["shotData"]>[number];
+
+  const updateShotLocal = (
+    episodeNumber: number,
+    shotNumber: number,
+    patch: Partial<ShotView>
+  ) => {
+    setItems((prev) =>
+      prev.map((item) =>
+        item.episodeNumber === episodeNumber
+          ? {
+              ...item,
+              shotData: item.shotData?.map((s) =>
+                s.shotNumber === shotNumber ? { ...s, ...patch } : s
+              ),
+            }
+          : item
+      )
+    );
+  };
+
+  const handleEditShot = async (
+    episodeNumber: number,
+    shotNumber: number,
+    fields: { visual?: string; line?: string; subtitle?: string; emotion?: string; duration?: number }
+  ): Promise<boolean> => {
+    const ep = items.find((i) => i.episodeNumber === episodeNumber);
+    if (!dramaId || !ep) return false;
+    try {
+      const res = await fetch(
+        `/api/dramas/${dramaId}/episodes/${ep.id}/shots/${shotNumber}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(fields),
+        }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error || "镜头保存失败");
+        return false;
+      }
+      updateShotLocal(episodeNumber, shotNumber, fields);
+      toast.success(`镜头 ${shotNumber} 已保存`);
+      return true;
+    } catch {
+      toast.error("镜头保存失败，请重试");
+      return false;
+    }
+  };
+
+  const handleRegenerateShot = async (
+    episodeNumber: number,
+    shotNumber: number,
+    targets: ("image" | "voiceover" | "video")[]
+  ) => {
+    const ep = items.find((i) => i.episodeNumber === episodeNumber);
+    if (!dramaId || !ep) return;
+
+    if (targets.includes("video")) {
+      toast.info(`镜头 ${shotNumber} AI 视频生成中，约需 2~5 分钟...`);
+    } else {
+      toast.info(`镜头 ${shotNumber} 重新生成中...`);
+    }
+
+    try {
+      const res = await fetch("/api/generate/shot-regenerate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          dramaId,
+          episodeId: ep.id,
+          shotNumber,
+          targets,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error || `镜头 ${shotNumber} 重跑失败`);
+        return;
+      }
+
+      if (data.taskId) {
+        // AI 视频：走后台任务，完成时自动刷新
+        setTaskDoneMsg(`镜头 ${shotNumber} AI 视频已生成`);
+        setActiveTaskId(data.taskId);
+        return;
+      }
+
+      // 同步部分（生图/配音）：刷新拿新资源
+      await fetchEpisodes();
+      toast.success(`镜头 ${shotNumber} 已重新生成`);
+    } catch {
+      toast.error(`镜头 ${shotNumber} 重跑失败，请重试`);
     }
   };
 
@@ -475,9 +556,21 @@ export default function StoryboardPageContent() {
                           character={shot.character}
                           line={shot.line}
                           subtitle={shot.subtitle}
+                          emotion={shot.emotion}
                           imageUrl={shot.imageUrl}
                           aiVideoUrl={shot.aiVideoUrl}
-                          onRegenerateImage={() => handleRegenerate(item.episodeNumber)}
+                          onEditSave={(fields) =>
+                            handleEditShot(item.episodeNumber, shot.shotNumber, fields)
+                          }
+                          onRegenerateImage={() =>
+                            handleRegenerateShot(item.episodeNumber, shot.shotNumber, ["image"])
+                          }
+                          onRegenerateVoiceover={() =>
+                            handleRegenerateShot(item.episodeNumber, shot.shotNumber, ["voiceover"])
+                          }
+                          onGenerateVideo={() =>
+                            handleRegenerateShot(item.episodeNumber, shot.shotNumber, ["video"])
+                          }
                         />
                       ))}
                     </div>

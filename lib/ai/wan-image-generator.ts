@@ -179,25 +179,54 @@ export function imageSizeToWanx(size: string, isVertical: boolean = false): stri
 // Endpoint: /api/v1/services/aigc/multimodal-generation/generation
 // ============================================================
 
+/** 多图参考生成的参考图（万相 2.7 支持 0-9 张） */
+export interface Wan27ReferenceImage {
+  /** 参考图 URL（公网可访问）或 base64 data URL */
+  url: string;
+  /** 角色/主体名，用于 prompt 中按"图N"定位 */
+  label?: string;
+}
+
 /**
  * 使用 wan2.7-image-pro 模型生成图片（同步，支持2K/4K）
  * 推荐使用，效果比 wanx-v1 好
+ *
+ * 支持多图参考生成（角色一致性）：传入 referenceImages 后，
+ * 模型会按参考图中人物的面貌/发型/服装出图。
+ * 注意：有图片输入时输出宽高比跟随最后一张输入图，
+ * 因此必须用显式像素 size（如 "1920*1080"）控制输出比例。
  */
 export async function generateWan27ImagePro(
   prompt: string,
   options?: {
-    size?: "1K" | "2K" | "4K"; // 默认 2K (2048x2048)
+    size?: "1K" | "2K" | "4K" | string; // 规格档位，或显式像素如 "1920*1080"
     n?: number;  // 生成数量 1-4，默认 1
     style?: string;
     watermark?: boolean;
     thinkingMode?: boolean;
     modelName?: string; // 模型名，默认 "wan2.7-image-pro"
+    referenceImages?: Wan27ReferenceImage[]; // 参考图（角色一致性）
   }
 ): Promise<string> {
   const apiKey = DASHSCOPE_API_KEY;
   if (!apiKey) throw new Error("DASHSCOPE_API_KEY 未配置");
 
   const modelName = options?.modelName || process.env.IMAGE_MODEL || "wan2.7-image-pro";
+  const refs = (options?.referenceImages || [])
+    .filter((r) => r?.url)
+    .slice(0, 9); // API 上限 9 张
+
+  // 组装 content：参考图在前，文字在后（文字中按"图N"引用）
+  const content: Record<string, string>[] = refs.map((r) => ({ image: r.url }));
+  if (refs.length > 0) {
+    const labels = refs.map((r, i) => `图${i + 1}是${r.label || "参考角色"}的形象参考`).join("，");
+    const names = refs.map((r) => r.label || "参考角色").join("、");
+    content.push({
+      text: `${labels}。请让${names}在画面中保持与参考图完全一致的面貌、发型与服装特征。${prompt}`,
+    });
+  } else {
+    content.push({ text: prompt });
+  }
 
   const response = await fetch(
     `${DASHSCOPE_BASE_URL}/api/v1/services/aigc/multimodal-generation/generation`,
@@ -212,14 +241,15 @@ export async function generateWan27ImagePro(
         input: {
           messages: [{
             role: "user",
-            content: [{ text: prompt }],
+            content,
           }],
         },
         parameters: {
           size: options?.size || "2K",
           n: options?.n || 1,
           watermark: options?.watermark ?? false,
-          thinking_mode: options?.thinkingMode ?? true,
+          // thinking_mode 仅在无图片输入时生效
+          ...(refs.length === 0 ? { thinking_mode: options?.thinkingMode ?? true } : {}),
           ...(options?.style ? { style: options.style } : {}),
         },
       }),
@@ -232,11 +262,21 @@ export async function generateWan27ImagePro(
   }
 
   const result = await response.json();
-  // 同步响应: output.choices[0].message.content[0].image
-  const imageUrl = result.output?.choices?.[0]?.message?.content?.[0]?.image ||
+  // 同步响应: output.choices[0].message.content 为数组，取第一个含 image 的条目
+  const contentArr = result.output?.choices?.[0]?.message?.content;
+  const imageItem = Array.isArray(contentArr)
+    ? contentArr.find((item: { image?: string }) => item?.image)
+    : null;
+  const imageUrl = imageItem?.image ||
+                   result.output?.choices?.[0]?.message?.content?.[0]?.image ||
                    result.output?.results?.[0]?.url || "";
   if (!imageUrl) throw new Error(`No image URL: ${JSON.stringify(result).substring(0, 200)}`);
 
-  log.info("Wan2.7 Image generated", { model: modelName, size: options?.size || "2K", url: imageUrl.substring(0, 60) });
+  log.info("Wan2.7 Image generated", {
+    model: modelName,
+    size: options?.size || "2K",
+    refCount: refs.length,
+    url: imageUrl.substring(0, 60),
+  });
   return imageUrl;
 }

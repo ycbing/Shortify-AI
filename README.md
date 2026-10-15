@@ -65,13 +65,15 @@ flowchart LR
 ### 🎨 AI 分镜配图
 - 单集配图 / 逐镜头配图
 - 多种生图模型可选：Wan2.7-image、CogView-3-Plus、Wanx-v1
+- **角色参考图一致性**：自动生成角色定妆照，万相 2.7 多图参考生成，跨镜头保持同脸
 - 自动上传至腾讯云 COS（私有桶 + 签名 URL）
 - 支持 16:9 横屏和 9:16 竖屏
 
 ### 🎙️ 多角色智能配音
-- 自动识别剧本角色性别/身份 → 分配对应音色
-- 男声 / 女声 / 旁白 / 童声等多种音色
-- **讯飞 TTS**（WebSocket，优先使用）+ **Edge-TTS**（自动降级）
+- 自动识别剧本角色性别/身份 → 分配对应音色，**不同角色强制不同音色**
+- **CosyVoice 情感配音**（优先使用）：LLM 为每个镜头标注情绪基调，驱动自然语言情感指令
+- **声音复刻**：上传 10~20 秒人声样本，为角色生成专属音色
+- **讯飞 TTS**（WebSocket）+ **Edge-TTS**（自动降级，音色智能映射不错乱）
 - 角色一致性：同一角色全剧使用同一个 voiceId
 
 ### 🎬 1080P 视频合成
@@ -97,6 +99,7 @@ flowchart LR
 - 📱 **响应式设计**（移动端 + 桌面端完美适配）
 - 📊 **创作看板**（进度跟踪、管理作品）
 - 🗑️ **作品管理**（编辑/复制/删除）
+- ✂️ **分镜编辑器**：单镜头改文案/情绪/时长，按需重跑生图（1 积分）/ 配音 / AI 视频（20 积分）
 
 ---
 
@@ -147,7 +150,7 @@ shortify-ai/
 | **AI 编剧** | GLM-4-Flash / DeepSeek / Qwen |
 | **AI 生图** | Wan2.7-image / CogView-3-Plus / Wanx-v1 |
 | **AI 视频** | Wan2.7-t2v / CogVideoX-3 |
-| **AI 配音** | 讯飞 TTS (WebSocket) + Edge-TTS |
+| **AI 配音** | CosyVoice 情感 TTS + 讯飞 TTS (WebSocket) + Edge-TTS |
 | **视频合成** | FFmpeg (zoompan + concat + subtitles) |
 | **存储** | 腾讯云 COS (私有桶 + 签名 URL) |
 | **部署** | PM2 + Nginx (反向代理) |
@@ -201,7 +204,7 @@ npm run dev
 | `DATABASE_URL` | ✅ | PostgreSQL 连接地址 |
 | `NEXTAUTH_SECRET` | ✅ | JWT 加密密钥 |
 | `GLM_API_KEY` | ✅ | 智谱 AI 密钥（剧本生成） |
-| `DASHSCOPE_API_KEY` | ❌ | 阿里百炼密钥（生图/视频） |
+| `DASHSCOPE_API_KEY` | ❌ | 阿里百炼密钥（生图/视频/情感配音） |
 | `XUNFEI_APPID` | ❌ | 讯飞 TTS |
 | `COS_SECRET_ID` | ❌ | 腾讯云 COS |
 | `VIDEO_PROVIDER` | ❌ | wan / cogvideo（默认 cogvideo）|
@@ -235,7 +238,10 @@ npx tsx scripts/full-pipeline.ts
 - [x] 积分/额度系统
 - [x] 在线分享
 - [x] BGM 背景音乐
-- [ ] 角色一致性进阶（IP-Adapter / 参考图）
+- [x] 角色参考图一致性（万相 2.7 多图参考 + 定妆照自动补建 + 一致性评分脚本）
+- [x] 声音复刻（CosyVoice Voice Enrollment，角色专属音色）
+- [x] 分镜编辑器 v1（单镜头文案编辑 + 生图/配音/视频按镜头重跑）
+- [ ] 主角 LoRA / IP-Adapter 训练管线（90%+ 一致性档）
 - [ ] 批量创作模板
 - [ ] 竖屏模式 (9:16)
 - [ ] 分镜编辑器增强

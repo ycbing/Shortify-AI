@@ -52,7 +52,11 @@ export interface Shot {
   line?: string;
   voiceId?: string;
   subtitle?: string;
+  /** 该镜头情绪基调（如 平静/紧张/开心/悲伤/惊讶），驱动 TTS 情感指令 */
+  emotion?: string;
   bgm?: string;
+  /** 分镜图 URL（COS/本地），storyboard 生成后写回 */
+  imageUrl?: string;
   aiVideoUrl?: string; // CogVideoX generated video local path
 }
 
@@ -142,11 +146,20 @@ export function isScriptV2(
 
 /** Voice IDs available for selection */
 export const VOICE_OPTIONS = {
-  "男声-年轻": "zh-CN-YunxiNeural",
-  "男声-中年": "zh-CN-YunjianNeural",
-  "女声-年轻": "zh-CN-XiaoxiaoNeural",
-  "女声-中年": "zh-CN-XiaomengNeural",
-  "旁白": "zh-CN-YunyangNeural",
+  // CosyVoice 音色（默认优先，7 个独立音色保证多角色不同声）
+  "女声-温柔": "longwan",
+  "女声-活力": "longxiaochun",
+  "女声-清亮": "longxiaoxia",
+  "女声-标准": "loongbella",
+  "男声-阳光": "longcheng",
+  "男声-沉稳": "longhua",
+  "男声-书卷": "longshu",
+  // 旧版 Edge-TTS 音色（保留兼容已有作品）
+  "男声-年轻(旧)": "zh-CN-YunxiNeural",
+  "男声-中年(旧)": "zh-CN-YunjianNeural",
+  "女声-年轻(旧)": "zh-CN-XiaoxiaoNeural",
+  "女声-中年(旧)": "zh-CN-XiaomengNeural",
+  "旁白(旧)": "zh-CN-YunyangNeural",
 } as const;
 
 export const NARRATION_VOICE = "zh-CN-YunyangNeural";

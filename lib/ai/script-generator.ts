@@ -59,11 +59,14 @@ export async function generateScript(
 ${STYLE_MAP[style]}：${STYLE_IMAGE_PROMPT[style]}
 
 ## 音色选择 (voiceId)
-- 男声-年轻: zh-CN-YunxiNeural
-- 男声-中年: zh-CN-YunjianNeural
-- 女声-年轻: zh-CN-XiaoxiaoNeural
-- 女声-中年: zh-CN-XiaomengNeural
-- 旁白: zh-CN-YunyangNeural
+从以下音色池中选择，**每个角色必须使用不同的音色**（根据角色性别与年龄气质挑选，主角音色与配角明显区分）：
+- 女声-温柔: longwan
+- 女声-活力: longxiaochun
+- 女声-清亮: longxiaoxia
+- 女声-标准: loongbella
+- 男声-阳光: longcheng
+- 男声-沉稳: longhua
+- 男声-书卷: longshu
 
 ## BGM 类型
 suspense(悬疑), romantic(浪漫), tense(紧张), calm(平静), dramatic(戏剧性), happy(欢快)
@@ -73,7 +76,7 @@ suspense(悬疑), romantic(浪漫), tense(紧张), calm(平静), dramatic(戏剧
 {
   "title": "短剧标题",
   "characters": [
-    { "name": "角色名", "description": "角色简介", "voiceId": "zh-CN-YunxiNeural", "appearance": "详细固定外貌描述（性别+年龄+发型+五官+体型+服装+配饰）" }
+    { "name": "角色名", "description": "角色简介", "voiceId": "longcheng", "appearance": "详细固定外貌描述（性别+年龄+发型+五官+体型+服装+配饰）" }
   ],
   "episodes": [
     {
@@ -87,6 +90,7 @@ suspense(悬疑), romantic(浪漫), tense(紧张), calm(平静), dramatic(戏剧
           "duration": 5,
           "type": "narration",
           "subtitle": "旁白或字幕文本",
+          "emotion": "紧张",
           "bgm": "suspense"
         },
         {
@@ -96,7 +100,8 @@ suspense(悬疑), romantic(浪漫), tense(紧张), calm(平静), dramatic(戏剧
           "type": "dialogue",
           "character": "角色名（必须与 characters 中的一致）",
           "line": "角色台词",
-          "voiceId": "zh-CN-YunxiNeural（使用该角色的 voiceId）"
+          "voiceId": "longcheng（使用该角色的 voiceId）",
+          "emotion": "惊讶"
         },
         {
           "shotNumber": 3,
@@ -105,7 +110,8 @@ suspense(悬疑), romantic(浪漫), tense(紧张), calm(平静), dramatic(戏剧
           "type": "dialogue",
           "character": "另一角色名",
           "line": "角色台词",
-          "voiceId": "zh-CN-XiaoxiaoNeural"
+          "voiceId": "longwan",
+          "emotion": "温柔"
         }
       ]
     }
@@ -123,7 +129,9 @@ suspense(悬疑), romantic(浪漫), tense(紧张), calm(平静), dramatic(戏剧
 - 每个 shot 的 visual 描述中，必须引用对应角色的 appearance 外貌描述，以保证图片生成的一致性
 - dialogue 类型的 shot 必须有 character（角色名）、line（台词）、voiceId（音色）
 - narration 类型的 shot 必须有 subtitle（字幕文本），不需要 voiceId
+- 每个 shot 必须有 "emotion" 字段（该镜头的情绪基调，8 字以内，从：平静/紧张/开心/悲伤/愤怒/惊讶/恐惧/温柔/兴奋/绝望 中选择或自拟），用于驱动语音合成的情感表达，需与台词内容和剧情相符
 - 同一角色在所有镜头中的 voiceId 必须一致，appearance 描述也必须一致
+- **不同角色的 voiceId 必须互不相同**（两个角色同音色会让观众混淆），角色超过 7 个时允许旁白类配角复用音色
 - 每集至少 5-10 个 shots，总时长 30-60 秒
 - **对话比例要求（极其重要）**: 每集的 shots 中，dialogue 类型必须占 60% 以上，narration 最多不超过 40%。用角色之间的对话推进剧情，避免大量旁白
 - sceneDescription 中要包含完整的环境描述，画风：${STYLE_IMAGE_PROMPT[style]}
@@ -136,7 +144,7 @@ suspense(悬疑), romantic(浪漫), tense(紧张), calm(平静), dramatic(戏剧
   - 悬疑类剧情通过表情、光影、氛围来营造紧张感，而非暴力画面
 
 ## 角色描述 JSON 格式示例
-{ "name": "苏小暖", "description": "女主角，活泼开朗", "voiceId": "zh-CN-XiaoxiaoNeural", "appearance": "20岁女大学生，黑色长发扎马尾，大眼睛双眼皮，皮肤白皙，身材纤细，穿白色T恤和浅蓝色牛仔裤，戴银色项链", "referenceImageUrl": "" }
+{ "name": "苏小暖", "description": "女主角，活泼开朗", "voiceId": "longwan", "appearance": "20岁女大学生，黑色长发扎马尾，大眼睛双眼皮，皮肤白皙，身材纤细，穿白色T恤和浅蓝色牛仔裤，戴银色项链", "referenceImageUrl": "" }
 
 ## 镜头级角色一致性规则（核心）
 - 每个 shot 的 visual 描述中，如果出现了某个角色，必须将该角色的完整 appearance 描述嵌入到 visual 文本中

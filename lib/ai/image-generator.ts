@@ -2,6 +2,7 @@ import { getStyleImagePrompt } from "./script-generator";
 import { withRetry, withTimeout } from "@/lib/resilience";
 import { createLogger } from "@/lib/logger";
 import { resolveConfig } from "@/lib/ai/model-resolver";
+import path from "path";
 
 const log = createLogger("image-generator");
 // 环境变量回退
@@ -145,6 +146,17 @@ async function generateImageWithCogView(
   throw new Error(`CogView 内容审核拦截，所有去敏尝试均失败: ${lastError.substring(0, 200)}`);
 }
 
+/**
+ * ImageSize 映射为 wan2.7 显式像素尺寸。
+ * 万相 2.7 规则：有图片输入时输出宽高比跟随最后一张参考图，
+ * 因此必须显式指定输出像素，否则横屏镜头会生成方图（合成时被黑边填充）。
+ */
+function toWan27PixelSize(size: ImageSize): string {
+  if (size === "720x1280" || size === "960x1728") return "1080*1920";
+  if (size === "1024x1024") return "1024*1024";
+  return "1920*1080";
+}
+
 export async function generateImage(
   prompt: string,
   style: string = "realistic",
@@ -161,22 +173,55 @@ export async function generateImage(
       ? `${prompt}。画面风格：${stylePrompt}。竖屏9:16构图，电影感画面。`
       : `${prompt}。画面风格：${stylePrompt}。宽屏16:9构图，电影感画面，专业摄影级别。`;
 
+    const characterReferences = (options?.characterReferences || []).filter((r) => r.imageUrl);
+
     // 检查环境变量或模型配置，决定用哪个模型
     const model = (process.env.IMAGE_MODEL || "wan2.7-image").toLowerCase();
     if (model.includes("wan2.7-image")) {
-      // wan2.7-image 系列（含 pro）支持同步调用 + 2K/4K，效果好
+      // wan2.7-image 系列（含 pro）支持同步调用 + 2K/4K + 多图参考（角色一致性）
       try {
-        const wanSize = model.includes("4k") ? "4K" : isVertical ? "2K" : "2K";
-        return await generateWan27ImagePro(fullPrompt, { size: wanSize as "1K" | "2K" | "4K" });
+        if (model.includes("4k") && characterReferences.length === 0) {
+          // 4K 仅支持规格档位；有参考图时必须显式像素
+          return await generateWan27ImagePro(fullPrompt, { size: "4K" });
+        }
+        if (characterReferences.length > 0) {
+          try {
+            return await generateWan27ImagePro(fullPrompt, {
+              size: toWan27PixelSize(size),
+              referenceImages: characterReferences.map((r) => ({
+                url: r.imageUrl,
+                label: r.characterName,
+              })),
+            });
+          } catch (err) {
+            // 参考图生成失败 → 降级为纯文本生成（宁可换脸也不要失败）
+            log.warn("Wan2.7 reference-image generation failed, falling back to text-only", {
+              refCount: characterReferences.length,
+              error: (err as Error).message,
+            });
+          }
+        }
+        // 无参考图路径：显式像素尺寸对齐视频目标分辨率，避免方图黑边
+        return await generateWan27ImagePro(fullPrompt, { size: toWan27PixelSize(size) });
       } catch (err) {
         log.warn("Wan2.7 Image Pro failed, falling back to wanx-v1", { error: (err as Error).message });
         // 降级到 wanx-v1
       }
+    } else if (characterReferences.length > 0) {
+      log.warn("Current image model does not support character references, ignoring them", {
+        model,
+        refCount: characterReferences.length,
+      });
     }
 
-    // 降级：wanx-v1（异步，需轮询）
+    // 降级：wanx-v1（异步，需轮询，不支持参考图）
     const wanxSize = imageSizeToWanx(size, isVertical);
     return await generateWanxImage(fullPrompt, { size: wanxSize });
+  }
+  if (options?.characterReferences?.length) {
+    log.warn("CogView fallback does not support character references, ignoring them", {
+      refCount: options.characterReferences.length,
+    });
   }
   return await generateImageWithCogView(prompt, style, size, options?.userId);
 }
@@ -192,7 +237,7 @@ export async function downloadImage(
 
   const buffer = Buffer.from(await response.arrayBuffer());
   const { writeFile, mkdir } = await import("fs/promises");
-  await mkdir(require("path").dirname(savePath), { recursive: true });
+  await mkdir(path.dirname(savePath), { recursive: true });
   await writeFile(savePath, buffer);
 
   return savePath;
