@@ -259,6 +259,14 @@ export default function ViewDramaPage() {
           <div className="flex items-center gap-3 mb-2">
             <h1 className="text-2xl font-bold">{drama.title}</h1>
             <Badge variant="outline">{DRAMA_STATUS_META[drama.status]?.label || drama.status}</Badge>
+            {/* AI 生成标识（《人工智能生成合成内容标识办法》显式标识要求） */}
+            <Badge
+              variant="outline"
+              className="border-amber-500/60 bg-amber-500/10 text-amber-600 dark:text-amber-300"
+              title="本作品由人工智能生成合成"
+            >
+              AI 生成
+            </Badge>
             {drama.shareCount != null && drama.shareCount > 0 && (
               <span className="text-xs text-muted-foreground">
                 {drama.shareCount} 次分享

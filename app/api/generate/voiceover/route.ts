@@ -11,6 +11,7 @@ import { checkCredits, CREDIT_COSTS, requireCreditDeduction, refundCredits } fro
 import { getOwnedDrama } from "@/lib/dramas";
 import { updateDramaStatus } from "@/lib/drama-status";
 import { composeEpisodeFromShots, composeVideo, mergeVideos } from "@/lib/ai/video-composer";
+import { mergedContentId } from "@/lib/ai/aigc-label";
 import { generateSubtitles } from "@/lib/ai/subtitle-generator";
 import { uploadFileToCos, videoCosKey } from "@/lib/ai/cos-storage";
 import { inferBgmPreset, BGM_VOLUME_MAP } from "@/lib/ai/bgm-library";
@@ -269,6 +270,8 @@ export async function POST(request: NextRequest) {
       userId: session.user.id,
       uploadDir,
       allEpisodes,
+      aspectRatio:
+        (drama.aspectRatio as "landscape" | "vertical") || "landscape",
       autoCompose,
     }).catch(err => log.error("Background voiceover processing failed", { error: err instanceof Error ? err.message : String(err) })).finally(() => releaseUserSlot(session.user.id));
 
@@ -299,6 +302,8 @@ type VoiceoverGenerationParams = {
   userId: string;
   uploadDir: string;
   allEpisodes: Episode[];
+  /** 成片画幅：决定合成分辨率与 AI 标识字号（此前固定按横屏合成，竖屏作品会被压成横屏） */
+  aspectRatio?: "landscape" | "vertical";
   autoCompose?: boolean;
 };
 
@@ -308,6 +313,7 @@ async function processVoiceoverGeneration({
   userId,
   uploadDir,
   allEpisodes,
+  aspectRatio = "landscape",
   autoCompose = true,
 }: VoiceoverGenerationParams) {
   const results: { episodeNumber: number; voiceoverUrl: string; duration: number; shotAudios?: unknown[] }[] = [];
@@ -606,6 +612,7 @@ async function processVoiceoverGeneration({
                 shotVideos,
                 bgmPath,
                 bgmVolume,
+                aspectRatio,
               }
             );
           } else if (episode.imageUrl && episode.voiceoverUrl) {
@@ -663,7 +670,10 @@ async function processVoiceoverGeneration({
         });
 
         const mergedPath = path.join(uploadDir, "videos", dramaId, "complete.mp4");
-        const localMergedPath = await mergeVideos(videoPaths, mergedPath);
+        const localMergedPath = await mergeVideos(videoPaths, mergedPath, undefined, {
+          contentId: mergedContentId(dramaId),
+          videoHeight: aspectRatio === "vertical" ? 1920 : 1080,
+        });
         const mergedCosKey = `${dramaId}/videos/complete.mp4`;
         mergedUrl = toDbPath(await uploadFileToCos(localMergedPath, mergedCosKey));
       }

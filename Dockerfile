@@ -13,7 +13,9 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
 FROM node:18-alpine AS runner
-RUN apk add --no-cache ffmpeg
+# ffmpeg 负责合成；font-noto-cjk 供 AI 标识 drawtext 烧录中文（缺失会导致标识降级或回退拉丁文案）
+# font-dejavu 作为 fontconfig 兜底字体（注意：alpine 的包名是 font-dejavu，不是 ttf-dejavu）
+RUN apk add --no-cache ffmpeg font-noto-cjk font-dejavu
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1

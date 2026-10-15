@@ -6,6 +6,11 @@ import { createWriteStream } from "fs";
 import https from "https";
 import http from "http";
 import { isCosUrl, cosKeyFromUrl, getSignedCosUrl } from "./cos-storage";
+import {
+  applyAigcLabel,
+  episodeContentId,
+  mergedContentId,
+} from "./aigc-label";
 import type { Shot, ShotAudio, CameraMove, ShotTransition } from "@/types/drama";
 import { createLogger } from "@/lib/logger";
 
@@ -696,6 +701,23 @@ export async function composeEpisodeFromShots(
     }
   }
 
+  // 合规标识（最后一步）：显式画面标识 + 隐式 AIGC 元数据，确保交付物已标识
+  const labelResult = await applyAigcLabel({
+    inputPath: outputPath,
+    contentId: episodeContentId(dramaId, episodeNumber),
+    videoHeight: options?.aspectRatio === "vertical" ? 1920 : 1080,
+  }).catch((err) => {
+    log.error("AI 标识施加失败（成片仍会返回，但可能不合规）", {
+      dramaId,
+      episodeNumber,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  });
+  if (labelResult && !labelResult.visibleBurned && labelResult.applied) {
+    log.warn("成片仅写入隐式元数据，未烧录可见标识", { dramaId, episodeNumber });
+  }
+
   // Clean up temp files
   await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {}); // best-effort cleanup
 
@@ -707,7 +729,18 @@ export async function composeEpisodeFromShots(
 export async function mergeVideos(
   videoPaths: string[],
   outputPath: string,
-  _transitionDuration?: number
+  _transitionDuration?: number,
+  options?: {
+    /** 合集成片的内容唯一编号（用于隐式 AIGC 标识） */
+    contentId?: string;
+    /**
+     * 是否重新烧录可见标识。
+     * 默认不烧录：各单集成片已带可见标识，流式合并会原样保留；
+     * 只有从外部导入的无标识片段才需要开启（需要重新编码）。
+     */
+    reburnVisibleLabel?: boolean;
+    videoHeight?: number;
+  }
 ): Promise<string> {
   if (videoPaths.length === 0) {
     throw new Error("No video paths provided");
@@ -729,6 +762,20 @@ export async function mergeVideos(
   await execAsync(cmd, { timeout: 300000 });
 
   await fs.unlink(concatListPath).catch(() => {});
+
+  // 合规标识：合集成片同样是独立交付物，需要自己的隐式元数据
+  await applyAigcLabel({
+    inputPath: outputPath,
+    contentId: options?.contentId || mergedContentId(path.basename(dir)),
+    generateState: "AI-generated",
+    videoHeight: options?.videoHeight || 1080,
+    allowVisible: Boolean(options?.reburnVisibleLabel),
+  }).catch((err) => {
+    log.error("合集成片 AI 标识施加失败", {
+      outputPath,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
 
   return outputPath;
 }

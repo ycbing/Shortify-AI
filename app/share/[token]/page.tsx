@@ -180,6 +180,14 @@ export default function SharePage() {
         )}
 
         <div className="flex flex-wrap items-center gap-2 mb-4">
+          {/* AI 生成标识（《人工智能生成合成内容标识办法》显式标识要求） */}
+          <Badge
+            variant="outline"
+            className="border-amber-500/60 bg-amber-500/10 text-amber-300"
+            title="本作品由人工智能生成合成"
+          >
+            AI 生成
+          </Badge>
           {drama.genre && (
             <Badge variant="outline" className="border-zinc-700 text-zinc-300">
               {GENRE_LABELS[drama.genre] || drama.genre}
