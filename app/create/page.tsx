@@ -11,7 +11,7 @@ import { TemplateSelector } from "@/components/create/template-selector";
 import { BgmUpload } from "@/components/create/bgm-upload";
 import { StepIndicator } from "@/components/create/step-indicator";
 import { AspectRatioSelector } from "@/components/create/aspect-ratio-selector";
-import { Loader2, Sparkles } from "lucide-react";
+import { Loader2, Sparkles, Lightbulb, Package, ClipboardList } from "lucide-react";
 import type { DramaGenreType, DramaStyleType } from "@/types/drama";
 
 const inspirations = [
@@ -153,13 +153,17 @@ function CreatePageContent() {
       <main className="mx-auto max-w-2xl px-4 py-8 sm:py-10">
         {/* Step hint */}
         <div className="mb-6 sm:mb-8 p-3 sm:p-4 rounded-lg bg-emerald-500/5 border border-emerald-500/20">
-          <p className="text-xs sm:text-sm text-emerald-400">
-            💡 描述你的短剧主题、类型和风格，AI 将根据你的创意创作剧本
+          <p className="text-xs sm:text-sm text-emerald-400 inline-flex items-start gap-1.5">
+            <Lightbulb className="h-4 w-4 shrink-0 mt-0.5" />
+            描述你的短剧主题、类型和风格，AI 将根据你的创意创作剧本
           </p>
         </div>
 
         <div className="mb-6 sm:mb-8">
-          <h1 className="text-xl sm:text-2xl font-bold mb-2">开始你的创作 ✨</h1>
+          <h1 className="text-xl sm:text-2xl font-bold mb-2 inline-flex items-center gap-2">
+            开始你的创作
+            <Sparkles className="h-5 w-5 text-emerald-400" />
+          </h1>
           <p className="text-sm sm:text-base text-muted-foreground">
             告诉我们你的创意，AI 将为你打造一部精彩短剧
           </p>
@@ -182,14 +186,20 @@ function CreatePageContent() {
 
           {/* Template Quick Select */}
           <div className="space-y-3">
-            <label className="text-sm font-medium">📦 热门模板</label>
+            <label className="text-sm font-medium inline-flex items-center gap-1.5">
+              <Package className="h-4 w-4 text-emerald-400" />
+              热门模板
+            </label>
             <p className="text-xs text-muted-foreground">选择热门题材模板，一键开始创作</p>
             <TemplateSelector onSelect={handleTemplateSelect} selectedTheme={theme} />
           </div>
 
           {/* Inspiration Cards */}
           <div id="inspirations" className="space-y-3">
-            <label className="text-sm font-medium">✨ 灵感参考</label>
+            <label className="text-sm font-medium inline-flex items-center gap-1.5">
+              <Sparkles className="h-4 w-4 text-emerald-400" />
+              灵感参考
+            </label>
             <div className="flex gap-3 overflow-x-auto pb-2 -mx-4 px-4 snap-x snap-mandatory scrollbar-none">
               {inspirations.map((insp, idx) => (
                 <button
@@ -212,7 +222,10 @@ function CreatePageContent() {
           {/* Preview Summary */}
           {canSubmit && (
             <div className="border border-emerald-500/20 rounded-lg p-4 bg-emerald-500/5">
-              <p className="text-sm font-medium mb-2">📋 创作预览</p>
+              <p className="text-sm font-medium mb-2 inline-flex items-center gap-1.5">
+                <ClipboardList className="h-4 w-4 text-emerald-400" />
+                创作预览
+              </p>
               <div className="grid grid-cols-2 gap-2 text-sm text-muted-foreground">
                 <span>主题</span><span className="text-foreground truncate ml-2">{theme}</span>
                 <span>类型</span><span className="text-foreground">{GENRE_LABELS[genre] || genre}</span>

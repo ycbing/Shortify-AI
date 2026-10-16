@@ -453,7 +453,7 @@ export default function StoryboardPageContent() {
         {/* Step hint */}
         <div className="mb-6 sm:mb-8 p-3 sm:p-4 rounded-lg bg-emerald-500/5 border border-emerald-500/20">
           <p className="text-xs sm:text-sm text-emerald-400">
-            🎨 AI 为每个镜头生成 1080p 画面，点击展开查看镜头详情
+            AI 为每个镜头生成 1080p 画面，点击展开查看镜头详情
             {totalShots > 0 && (
               <span className="ml-2 text-emerald-400/70">
                 共 {items.length} 集 / {totalShots} 个镜头
@@ -465,7 +465,7 @@ export default function StoryboardPageContent() {
 
         <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 sm:mb-8 gap-3">
           <div>
-            <h1 className="text-xl sm:text-2xl font-bold mb-1">AI 分镜 🎨</h1>
+            <h1 className="text-xl sm:text-2xl font-bold mb-1">AI 分镜</h1>
             <p className="text-xs sm:text-sm text-muted-foreground">每个镜头独立生成画面，支持 1080p 高清</p>
           </div>
           <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">

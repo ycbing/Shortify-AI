@@ -4,8 +4,8 @@ import Link from "next/link";
 import { Header } from "@/components/landing/header";
 import { Footer } from "@/components/landing/footer";
 import { Button } from "@/components/ui/button";
-import { Sparkles, PenTool, Image, Mic, Film, ArrowRight, Heart, Clock, Star, Quote } from "lucide-react";
-import { useState, useEffect, useRef, Suspense } from "react";
+import { Sparkles, PenTool, Image, Mic, Film, ArrowRight, Heart, Clock, HelpCircle, Flame } from "lucide-react";
+import { useState, useEffect } from "react";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 
 const features = [
@@ -69,6 +69,7 @@ function HotWorks() {
     );
   }
 
+  // 无公开作品时整个区块隐藏（宁缺毋假）
   if (works.length === 0) return null;
 
   return (
@@ -109,6 +110,37 @@ function HotWorks() {
   );
 }
 
+function RealStats() {
+  const [stats, setStats] = useState<{ completedDramas: number; episodes: number; creators: number } | null>(null);
+
+  useEffect(() => {
+    fetch("/api/stats")
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => { if (data) setStats(data); })
+      .catch(() => {})
+  }, []);
+
+  // 数据为空/加载失败时隐藏，展示假数据不如不展示
+  if (!stats || stats.completedDramas === 0) return null;
+
+  return (
+    <div className="mx-auto max-w-5xl grid grid-cols-3 gap-6 sm:gap-8 text-center">
+      <div>
+        <p className="text-2xl sm:text-3xl lg:text-4xl font-bold bg-gradient-to-r from-emerald-400 to-teal-300 bg-clip-text text-transparent">{stats.completedDramas}</p>
+        <p className="text-xs sm:text-sm text-muted-foreground mt-1">已完成作品</p>
+      </div>
+      <div>
+        <p className="text-2xl sm:text-3xl lg:text-4xl font-bold bg-gradient-to-r from-emerald-400 to-teal-300 bg-clip-text text-transparent">{stats.episodes}</p>
+        <p className="text-xs sm:text-sm text-muted-foreground mt-1">生成剧集</p>
+      </div>
+      <div>
+        <p className="text-2xl sm:text-3xl lg:text-4xl font-bold bg-gradient-to-r from-emerald-400 to-teal-300 bg-clip-text text-transparent">{stats.creators}</p>
+        <p className="text-xs sm:text-sm text-muted-foreground mt-1">位创作者</p>
+      </div>
+    </div>
+  );
+}
+
 export default function HomePage() {
   return (
     <div className="min-h-screen">
@@ -129,7 +161,7 @@ export default function HomePage() {
             用 AI 创作短剧
             <br />
             <span className="bg-gradient-to-r from-emerald-400 via-teal-300 to-cyan-400 bg-clip-text text-transparent text-[1.75rem] sm:text-4xl lg:text-5xl xl:text-6xl">
-              从创意到成片只需 5 分钟
+              输入一行创意，收获一部成片
             </span>
           </h1>
 
@@ -156,8 +188,22 @@ export default function HomePage() {
         </div>
       </section>
 
+      {/* Hot Works — 真实产出紧跟首屏，无作品时整块隐藏 */}
+      <section className="py-16 sm:py-20 px-4">
+        <div className="mx-auto max-w-6xl">
+          <div className="text-center mb-10 sm:mb-12">
+            <h2 className="text-xl sm:text-3xl font-bold mb-3 sm:mb-4 inline-flex items-center justify-center gap-2">
+              <Flame className="h-5 w-5 sm:h-6 sm:w-6 text-emerald-400" />
+              热门作品
+            </h2>
+            <p className="text-sm sm:text-base text-muted-foreground">来自创作者们的 AI 短剧</p>
+          </div>
+          <HotWorks />
+        </div>
+      </section>
+
       {/* Features — 2-col on mobile, 4-col on desktop */}
-      <section id="features" className="py-16 sm:py-20 px-4">
+      <section id="features" className="py-16 sm:py-20 px-4 bg-muted/20">
         <div className="mx-auto max-w-6xl">
           <div className="text-center mb-10 sm:mb-12">
             <h2 className="text-xl sm:text-3xl font-bold mb-3 sm:mb-4">四大核心功能</h2>
@@ -182,7 +228,7 @@ export default function HomePage() {
       </section>
 
       {/* Templates — 1-col on mobile, 3-col on sm+ */}
-      <section className="py-16 sm:py-20 px-4 bg-muted/20">
+      <section className="py-16 sm:py-20 px-4">
         <div className="mx-auto max-w-4xl">
           <div className="text-center mb-10 sm:mb-12">
             <h2 className="text-xl sm:text-3xl font-bold mb-3 sm:mb-4">试试这些模板</h2>
@@ -206,73 +252,29 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Hot Works — loaded from API */}
-      <section id="hot-works" className="py-16 sm:py-20 px-4">
-        <div className="mx-auto max-w-6xl">
-          <div className="text-center mb-10 sm:mb-12">
-            <h2 className="text-xl sm:text-3xl font-bold mb-3 sm:mb-4">🔥 热门作品</h2>
-            <p className="text-sm sm:text-base text-muted-foreground">来自创作者们的 AI 短剧</p>
-          </div>
-          <HotWorks />
-        </div>
-      </section>
-
-      {/* Stats */}
+      {/* Stats — 真实计数，无数据时隐藏 */}
       <section className="py-16 sm:py-20 px-4 bg-muted/20">
-        <div className="mx-auto max-w-5xl grid grid-cols-2 sm:grid-cols-4 gap-6 sm:gap-8 text-center">
-          {[{ value: "10,000+", label: "AI 短剧已创作" }, { value: "50,000+", label: "AI 分镜生成" }, { value: "5,000+", label: "创作者" }, { value: "4.9", label: "用户评分 ⭐" }].map((s) => (
-            <div key={s.label}>
-              <p className="text-2xl sm:text-3xl lg:text-4xl font-bold bg-gradient-to-r from-emerald-400 to-teal-300 bg-clip-text text-transparent">{s.value}</p>
-              <p className="text-xs sm:text-sm text-muted-foreground mt-1">{s.label}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Testimonials */}
-      <section className="py-16 sm:py-20 px-4">
-        <div className="mx-auto max-w-5xl">
-          <div className="text-center mb-10 sm:mb-12">
-            <h2 className="text-xl sm:text-3xl font-bold mb-3 sm:mb-4">💬 用户评价</h2>
-            <p className="text-sm sm:text-base text-muted-foreground">听听创作者们怎么说</p>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {[
-              { avatar: "👩‍💻", name: "小鱼", role: "自媒体创作者", text: "从创意到成片只用了 5 分钟，完全超出预期！AI 写的剧本比我自己写的还好看", stars: 5 },
-              { avatar: "🎬", name: "导演阿杰", role: "影视专业学生", text: "分镜生成太强了，角色一致性很高，直接可以用来做预演分镜", stars: 5 },
-              { avatar: "📱", name: "晓月", role: "短视频博主", text: "配音效果很自然，多角色切换很流畅，省了我大量后期时间", stars: 5 },
-            ].map((t) => (
-              <div key={t.name} className="border border-border/50 rounded-xl p-5 bg-card/50">
-                <div className="flex items-center gap-1 mb-3">{Array.from({ length: t.stars }).map((_, i) => <Star key={i} className="h-4 w-4 fill-amber-400 text-amber-400" />)}</div>
-                <p className="text-sm text-foreground/90 leading-relaxed mb-4">&ldquo;{t.text}&rdquo;</p>
-                <div className="flex items-center gap-2">
-                  <span className="text-2xl">{t.avatar}</span>
-                  <div>
-                    <p className="text-sm font-medium">{t.name}</p>
-                    <p className="text-xs text-muted-foreground">{t.role}</p>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+        <RealStats />
       </section>
 
       {/* FAQ */}
-      <section className="py-16 sm:py-20 px-4 bg-muted/20">
+      <section className="py-16 sm:py-20 px-4">
         <div className="mx-auto max-w-3xl">
           <div className="text-center mb-10 sm:mb-12">
-            <h2 className="text-xl sm:text-3xl font-bold mb-3 sm:mb-4">❓ 常见问题</h2>
+            <h2 className="text-xl sm:text-3xl font-bold mb-3 sm:mb-4 inline-flex items-center justify-center gap-2">
+              <HelpCircle className="h-5 w-5 sm:h-6 sm:w-6 text-emerald-400" />
+              常见问题
+            </h2>
             <p className="text-sm sm:text-base text-muted-foreground">关于 Shortify AI 你可能想知道的</p>
           </div>
           <Accordion type="single" collapsible className="space-y-3">
             {[
-              { q: "Shortify AI 是免费的吗？", a: "注册即送 200 积分，足够体验完整创作流程。之后每项操作会消耗少量积分，比如生图每张约 0.5 积分、配音每集约 2 积分。你可以通过邀请好友或充值获取更多积分。" },
-              { q: "生成一个短剧需要多久？", a: "剧本生成约 10-30 秒，分镜图片每张 5-15 秒（取决于集数），配音每集 3-8 秒。一部 3 集短剧从创意到成片通常 2-5 分钟即可完成。" },
-              { q: "可以自定义角色外观吗？", a: "可以！在剧本编辑页面，你可以为每个角色编写外貌描述（发型、服装、体型等），AI 生图时会参考这些描述，确保不同镜头中角色外观一致。" },
+              { q: "Shortify AI 是免费的吗？", a: "注册即送 200 积分，可以完整体验一次创作流程。积分消耗：剧本 10 积分、分镜每集 5 积分、配音每集 5 积分、角色参考图每个 1 积分；AI 视频为可选增强，每镜头 20 积分。不开启 AI 视频时，200 积分足够完成一部多集短剧。" },
+              { q: "生成一个短剧需要多久？", a: "取决于模式：标准模式（图片动效合成）一部 3 集短剧从创意到成片约 2-5 分钟；开启 AI 视频后每个镜头需 2-5 分钟生成，适合对画面要求更高的场景，支持先生成预览再逐镜头精修。" },
+              { q: "可以自定义角色外观吗？", a: "可以！平台会为每个角色生成定妆参考照，你也可以上传 10~20 秒人声样本为角色复刻专属音色。角色外貌与声音会在所有镜头中保持一致。" },
               { q: "支持哪些视频风格？", a: "目前支持写实、动漫、水墨、赛博朋克四种核心风格。同时你可以通过文字描述自定义场景氛围，AI 会根据你的风格选择和描述生成匹配的分镜画面。" },
-              { q: "生成的视频可以商用吗？", a: "可以。你创作的所有内容版权归你所有，可以自由使用、分享和商用。平台不主张任何版权。" },
-              { q: "如何提高视频质量？", a: "建议：1) 编写详细的角色外貌描述；2) 每集镜头数控制在 3-6 个；3) 在剧本编辑中优化画面描述；4) 使用 1080p 高清模式。我们也在持续优化 AI 模型质量。" },
+              { q: "生成的视频可以商用吗？", a: "你创作的所有内容版权归你所有，可以自由使用。平台已按《人工智能生成合成内容标识办法》为成片添加 AI 生成标识与溯源信息，商用发布请遵守平台与渠道的相关规范。" },
+              { q: "如何提高视频质量？", a: "建议：1) 编写详细的角色外貌描述；2) 每集镜头数控制在 3-6 个；3) 用分镜编辑器调整镜头语言（景别/运镜）后单独重跑；4) 开启 AI 视频获得动态画面。我们也在持续优化模型质量。" },
             ].map((item, i) => (
               <AccordionItem key={i} value={`faq-${i}`} className="border border-border/50 rounded-lg bg-card/50 px-4 data-[state=open]:border-emerald-500/30">
                 <AccordionTrigger className="text-sm sm:text-base text-left hover:no-underline py-4">{item.q}</AccordionTrigger>
