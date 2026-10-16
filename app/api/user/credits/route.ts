@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getCreditBalance, getUsageLogs } from "@/lib/credits";
+import { summarizeLogCost } from "@/lib/pricing";
 import { createLogger } from "@/lib/logger";
 
 const log = createLogger("credits-api");
@@ -12,12 +13,16 @@ export async function GET() {
       return NextResponse.json({ error: "未登录" }, { status: 401 });
     }
 
-    const [balance, logs] = await Promise.all([
+    const [balance, logs, recentLogs] = await Promise.all([
       getCreditBalance(session.user.id),
       getUsageLogs(session.user.id, 20),
+      // 成本估算基于更大的窗口（展示仍用最近 20 条）
+      getUsageLogs(session.user.id, 200),
     ]);
 
-    return NextResponse.json({ balance, logs });
+    const costEstimate = summarizeLogCost(recentLogs);
+
+    return NextResponse.json({ balance, logs, costEstimate });
   } catch (error) {
     log.error("Failed to fetch credits", { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json({ error: "获取积分信息失败" }, { status: 500 });

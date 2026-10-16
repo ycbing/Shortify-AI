@@ -36,10 +36,35 @@ interface UsageLog {
   createdAt: string;
 }
 
+interface CostByType {
+  credits: number;
+  quantity: number;
+  cny: number;
+  unit: string;
+}
+
 interface CreditInfo {
   balance: number;
   logs: UsageLog[];
+  costEstimate?: {
+    totalCNY: number;
+    totalCredits: number;
+    cnyPerCredit: number;
+    byType: Record<string, CostByType>;
+  };
 }
+
+const CREDIT_TYPE_LABELS: Record<string, string> = {
+  script: "生成剧本",
+  storyboard: "生成分镜",
+  voiceover: "生成配音",
+  compose: "合成视频",
+  video: "AI 视频生成",
+  narration: "解说生成",
+  characterReference: "角色参考图",
+  voiceClone: "声音复刻",
+  shotImage: "单镜头重跑生图",
+};
 
 const TYPE_LABELS: Record<string, string> = {
   script: "生成剧本",
@@ -98,6 +123,7 @@ export default function SettingsPage() {
 
   const balance = creditInfo?.balance ?? 0;
   const logs = creditInfo?.logs ?? [];
+  const costEstimate = creditInfo?.costEstimate;
 
   return (
     <div className="min-h-screen bg-background">
@@ -215,6 +241,41 @@ export default function SettingsPage() {
                 </div>
               </CardContent>
             </Card>
+
+            {/* 资源成本估算（按可配置单价估算，非实际账单） */}
+            {costEstimate && costEstimate.totalCredits > 0 && (
+              <Card className="border-border/50 bg-card/50">
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center justify-between text-base">
+                    <span className="flex items-center gap-2">
+                      <Sparkles className="h-5 w-5 text-emerald-400" />
+                      资源成本估算
+                    </span>
+                    <span className="text-sm font-semibold text-emerald-400">
+                      ≈ ¥{costEstimate.totalCNY.toFixed(2)}
+                    </span>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2">
+                    {Object.entries(costEstimate.byType).map(([type, item]) => (
+                      <div
+                        key={type}
+                        className="flex items-center justify-between py-2 px-3 rounded-lg bg-muted/30 text-sm"
+                      >
+                        <span>{CREDIT_TYPE_LABELS[type] || type}</span>
+                        <span className="text-muted-foreground text-xs">
+                          {item.quantity.toFixed(1)} {item.unit} · ≈ ¥{item.cny.toFixed(2)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-3 leading-relaxed">
+                    基于最近 200 条用量记录，按可配置单价估算（每积分 ≈ ¥{costEstimate.cnyPerCredit.toFixed(4)}）。供应商单价可在环境变量 PRICING_CNY_* 中调整，实际以供应商账单为准。
+                  </p>
+                </CardContent>
+              </Card>
+            )}
 
             {/* Usage history */}
             <Card className="border-border/50 bg-card/50">

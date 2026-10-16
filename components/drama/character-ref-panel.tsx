@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Loader2, RefreshCw, Check, User, Camera, SkipForward, Mic } from "lucide-react";
@@ -241,10 +242,12 @@ export function CharacterRefPanel({
               <div className="aspect-square bg-muted/50 relative">
                 {refUrl ? (
                   <>
-                    <img
+                    <Image
                       src={refUrl}
                       alt={char.name}
-                      className="w-full h-full object-cover"
+                      fill
+                      sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+                      className="object-cover"
                     />
                     <div className="absolute top-2 right-2 bg-emerald-500/90 text-white text-[10px] px-1.5 py-0.5 rounded">
                       参考图

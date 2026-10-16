@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -49,10 +50,12 @@ export function StoryboardPanel({
             >
               <div className="aspect-video bg-muted relative">
                 {item.imageUrl ? (
-                  <img
+                  <Image
                     src={item.imageUrl}
                     alt={item.title}
-                    className="w-full h-full object-cover"
+                    fill
+                    sizes="(max-width: 640px) 33vw, 200px"
+                    className="object-cover"
                   />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center">
@@ -80,10 +83,12 @@ export function StoryboardPanel({
           <div className="border border-border/50 rounded-lg overflow-hidden bg-card/50">
             <div className="aspect-video bg-muted relative">
               {selected.imageUrl ? (
-                <img
+                <Image
                   src={selected.imageUrl}
                   alt={selected.title}
-                  className="w-full h-full object-contain"
+                  fill
+                  sizes="(max-width: 1024px) 100vw, 50vw"
+                  className="object-contain"
                 />
               ) : (
                 <div className="w-full h-full flex items-center justify-center">
