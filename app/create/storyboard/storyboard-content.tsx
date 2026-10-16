@@ -17,6 +17,19 @@ const steps = [
   { number: 3, title: "分镜" },
 ];
 
+/** 任务心跳 stage → 中文标签（与后端 touchGenerationTaskHeartbeat 的 stage 对应） */
+const STAGE_LABELS: Record<string, string> = {
+  generate: "生成分镜图",
+  "ai-video": "生成 AI 视频",
+  subtitles: "生成字幕",
+  compose: "合成视频",
+  "auto-compose": "自动合成",
+  merge: "拼接合集",
+  submit: "提交任务",
+  download: "下载结果",
+  annotate: "标注情绪/音效",
+};
+
 interface StoryboardItem {
   id: string;
   episodeNumber: number;
@@ -67,6 +80,7 @@ export default function StoryboardPageContent() {
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [taskProgressLabel, setTaskProgressLabel] = useState("");
   const [taskDoneMsg, setTaskDoneMsg] = useState("分镜生成完成");
+  const [taskStage, setTaskStage] = useState<string | null>(null);
   const [annotating, setAnnotating] = useState<number | "all" | null>(null);
 
   const toPublicUrl = (p: string | null | undefined): string | null => {
@@ -116,6 +130,7 @@ export default function StoryboardPageContent() {
       setGenerating(false);
       setGeneratingIndex(-1);
       setActiveTaskId(null);
+      setTaskStage(null);
       setTaskProgressLabel(task.presentation?.summary || "");
       await fetchEpisodes();
       toast.success(taskDoneMsg);
@@ -124,6 +139,7 @@ export default function StoryboardPageContent() {
       setGenerating(false);
       setGeneratingIndex(-1);
       setActiveTaskId(null);
+      setTaskStage(null);
       setTaskProgressLabel(task.presentation?.summary || "");
       setError(task.presentation?.failureTitle || task.errorMessage || "分镜生成失败");
       toast.error(task.presentation?.failureTitle || task.errorMessage || "分镜生成失败");
@@ -188,6 +204,7 @@ export default function StoryboardPageContent() {
       setGenerating(false);
       setGeneratingIndex(-1);
       setActiveTaskId(null);
+      setTaskStage(null);
       setTaskProgressLabel(task.presentation?.summary || "");
       await fetchEpisodes();
       toast.success(taskDoneMsg);
@@ -196,12 +213,14 @@ export default function StoryboardPageContent() {
       setGenerating(false);
       setGeneratingIndex(-1);
       setActiveTaskId(null);
+      setTaskStage(null);
       setTaskProgressLabel(task.presentation?.summary || "");
       setError(task.presentation?.failureTitle || task.errorMessage || "分镜生成失败");
       toast.error(task.presentation?.failureTitle || task.errorMessage || "分镜生成失败");
     },
     onProgress: (event) => {
       const p = event.payload;
+      if (p.stage) setTaskStage(p.stage);
       if (p.currentEpisode) setGeneratingIndex(p.currentEpisode - 1);
       if (p.stage === "generate" && p.currentEpisode && p.totalCount) {
         setTaskProgressLabel(`正在生成第 ${p.currentEpisode} / ${p.totalCount} 集分镜...`);
@@ -529,7 +548,14 @@ export default function StoryboardPageContent() {
                 <p className="text-sm font-medium text-emerald-400">
                   {progressLabel || `正在生成第 ${generatingIndex >= 0 ? generatingIndex + 1 : "?"} / ${totalCount} 集分镜`}
                 </p>
-                <p className="text-xs text-muted-foreground">每张图片需要 10-20 秒</p>
+                <p className="text-xs text-muted-foreground inline-flex items-center gap-1.5">
+                  {taskStage && STAGE_LABELS[taskStage] && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                      {STAGE_LABELS[taskStage]}
+                    </span>
+                  )}
+                  每张图片需要 10-20 秒
+                </p>
               </div>
               {activeTaskId && (
                 <Button variant="outline" size="sm" onClick={handleCancelTask}>

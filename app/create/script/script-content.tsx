@@ -434,7 +434,7 @@ export default function ScriptPageContent() {
                         {char.description}
                       </p>
                       <div className="mt-2 pt-2 border-t border-border/30">
-                        <p className="text-xs text-muted-foreground/70 mb-1">🎨 外貌描述（用于图片生成一致性）</p>
+                        <p className="text-xs text-muted-foreground/70 mb-1">外貌描述（用于图片生成一致性）</p>
                         <textarea
                           className="w-full text-xs sm:text-sm text-amber-300/80 leading-relaxed bg-transparent border border-border/30 rounded p-2 resize-y min-h-[3rem] focus:outline-none focus:border-emerald-500/50"
                           value={char.appearance || ""}

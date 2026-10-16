@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import Image from "next/image";
 import { Plus, Loader2, Trash2, Copy, Pencil, Film, Check, Settings, Search, LayoutGrid, List, ArrowUpDown } from "lucide-react";
 import { GeneratingProgressBadge } from "@/components/drama/generating-progress-badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -264,7 +265,7 @@ export default function DashboardPage() {
         {/* Drama grid — single column on mobile */}
         {filteredDramas.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-center">
-            <span className="text-5xl mb-4">{search ? "🔍" : "🎬"}</span>
+            {search ? <Search className="h-10 w-10 mb-4 text-muted-foreground/40" /> : <Film className="h-10 w-10 mb-4 text-muted-foreground/40" />}
             <h3 className="text-lg font-semibold mb-2">{search ? "没有找到匹配的短剧" : "还没有短剧"}</h3>
             <p className="text-sm text-muted-foreground mb-6">
               {search ? "试试其他关键词，或创建一个新短剧" : "点击「创建短剧」开始你的创作之旅"}
@@ -391,10 +392,12 @@ function DramaCardWithActions({ drama, onDelete, onCopy, copying }: DramaCardPro
       <Link href={dramaCompleted ? getViewUrl() : editorUrl} className="block">
         <div className="relative aspect-video bg-muted overflow-hidden">
           {coverSrc ? (
-            <img
+            <Image
               src={coverSrc}
               alt={drama.title}
-              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+              fill
+              sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
+              className="object-cover group-hover:scale-105 transition-transform duration-500"
             />
           ) : (
             <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-zinc-800 to-zinc-900">
@@ -519,9 +522,9 @@ function DramaListItem({ drama, onDelete, onCopy, copying }: DramaCardProps) {
   return (
     <div className="group flex items-center gap-3 sm:gap-4 border border-border/50 rounded-lg p-3 bg-card/50 hover:border-emerald-500/50 hover:bg-card/80 transition-all">
       <Link href={dramaCompleted ? `/view/${drama.id}` : editorUrl} className="shrink-0">
-        <div className="w-20 h-12 sm:w-28 sm:h-16 rounded overflow-hidden bg-muted">
+        <div className="relative w-20 h-12 sm:w-28 sm:h-16 rounded overflow-hidden bg-muted">
           {coverSrc ? (
-            <img src={coverSrc} alt={drama.title} className="w-full h-full object-cover" />
+            <Image src={coverSrc} alt={drama.title} fill sizes="112px" className="object-cover" />
           ) : (
             <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-zinc-800 to-zinc-900">
               <Film className="h-5 w-5 text-muted-foreground/50" />

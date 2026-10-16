@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { Header } from "@/components/landing/header";
 import { Footer } from "@/components/landing/footer";
 import { Button } from "@/components/ui/button";
-import { Sparkles, PenTool, Image, Mic, Film, ArrowRight, Heart, Clock, HelpCircle, Flame } from "lucide-react";
+import { Sparkles, PenTool, Image as ImageIcon, Mic, Film, ArrowRight, Heart, Clock, HelpCircle, Flame } from "lucide-react";
 import { useState, useEffect } from "react";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 
@@ -15,7 +16,7 @@ const features = [
     desc: "输入创意主题，AI 自动生成完整剧本，每集都有悬念和反转",
   },
   {
-    icon: Image,
+    icon: ImageIcon,
     title: "AI 分镜生成",
     desc: "自动为每集生成高质量分镜图片，支持多种画风选择",
   },
@@ -80,9 +81,9 @@ function HotWorks() {
           href={`/view/${w.id}`}
           className="border border-border/50 rounded-xl overflow-hidden bg-card/30 hover:border-emerald-500/30 hover:bg-card/50 transition-all group"
         >
-          <div className="aspect-video bg-muted overflow-hidden">
+          <div className="relative aspect-video bg-muted overflow-hidden">
             {w.coverUrl ? (
-              <img src={w.coverUrl} alt={w.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" />
+              <Image src={w.coverUrl} alt={w.title} fill sizes="(max-width: 640px) 100vw, 33vw" className="object-cover group-hover:scale-105 transition-transform duration-500" />
             ) : (
               <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-zinc-800 to-zinc-900">
                 <Film className="h-8 w-8 text-muted-foreground/50" />

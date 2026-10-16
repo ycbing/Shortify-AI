@@ -42,19 +42,19 @@ interface CreditInfo {
 }
 
 const TYPE_LABELS: Record<string, string> = {
-  script: "📝 生成剧本",
-  storyboard: "🎨 生成分镜",
-  voiceover: "🎙️ 生成配音",
-  compose: "🎬 合成视频",
-  video: "🤖 AI 视频生成",
+  script: "生成剧本",
+  storyboard: "生成分镜",
+  voiceover: "生成配音",
+  compose: "合成视频",
+  video: "AI 视频生成",
 };
 
 const COST_DISPLAY = [
-  { type: "生成剧本", cost: 10, icon: "📝" },
-  { type: "分镜图片（每集）", cost: 5, icon: "🎨" },
-  { type: "配音（每集）", cost: 5, icon: "🎙️" },
-  { type: "视频合成（每集）", cost: 5, icon: "🎬" },
-  { type: "AI 视频生成（每镜头）", cost: 20, icon: "🤖" },
+  { type: "生成剧本", cost: 10 },
+  { type: "分镜图片（每集）", cost: 5 },
+  { type: "配音（每集）", cost: 5 },
+  { type: "视频合成（每集）", cost: 5 },
+  { type: "AI 视频生成（每镜头）", cost: 20 },
 ];
 
 export default function SettingsPage() {
@@ -204,7 +204,7 @@ export default function SettingsPage() {
                       className="flex items-center justify-between py-2 px-3 rounded-lg bg-muted/30"
                     >
                       <div className="flex items-center gap-2 text-sm">
-                        <span>{item.icon}</span>
+                        
                         <span>{item.type}</span>
                       </div>
                       <Badge variant="outline" className="text-emerald-400 border-emerald-500/30">

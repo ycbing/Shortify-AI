@@ -241,7 +241,7 @@ function CreatePageContent() {
           {/* BGM Upload — saves file to state, uploads after drama creation */}
           <div className="space-y-2">
             <label className="text-sm font-medium flex items-center gap-2">
-              🎵 背景音乐（可选）
+              背景音乐（可选）
             </label>
             <p className="text-xs text-muted-foreground">
               上传 MP3 或 WAV 文件，视频合成时将自动混入背景音

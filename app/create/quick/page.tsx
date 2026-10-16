@@ -502,7 +502,7 @@ export default function QuickCreatePage() {
         <main className="mx-auto max-w-2xl px-4 py-6 space-y-6">
           {/* Title */}
           <div>
-            <h1 className="text-xl font-bold mb-1">选择模板或输入创意 ✨</h1>
+            <h1 className="text-xl font-bold mb-1">选择模板或输入创意</h1>
             <p className="text-sm text-zinc-400">
               选择一个热门模板快速开始，或描述你自己的故事
             </p>
@@ -645,7 +645,7 @@ export default function QuickCreatePage() {
         <main className="mx-auto max-w-2xl px-4 py-6 space-y-6">
           {/* Summary */}
           <div className="p-4 rounded-xl border border-zinc-800 bg-zinc-900/50 space-y-3">
-            <p className="text-sm font-medium text-emerald-400">📋 创作概要</p>
+            <p className="text-sm font-medium text-emerald-400">创作概要</p>
             <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm">
               <span className="text-zinc-500">创意</span>
               <span className="text-zinc-200 line-clamp-2">{theme}</span>
@@ -663,7 +663,7 @@ export default function QuickCreatePage() {
 
           {/* Style */}
           <div className="space-y-3">
-            <label className="text-sm font-medium">🎨 画面风格</label>
+            <label className="text-sm font-medium">画面风格</label>
             <div className="grid grid-cols-2 gap-3">
               {STYLE_OPTIONS.map((s) => (
                 <button
@@ -687,7 +687,7 @@ export default function QuickCreatePage() {
 
           {/* Episode count */}
           <div className="space-y-3">
-            <label className="text-sm font-medium">🎬 集数</label>
+            <label className="text-sm font-medium">集数</label>
             <div className="flex gap-3">
               {[1, 2, 3, 4, 5].map((n) => (
                 <button

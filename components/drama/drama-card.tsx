@@ -4,7 +4,8 @@ import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import type { DramaWithEpisodes } from "@/types/drama";
-import { Check } from "lucide-react";
+import Image from "next/image";
+import { Check, Film } from "lucide-react";
 import {
   getDramaEditorPath,
   DRAMA_PROGRESS_STEPS,
@@ -28,14 +29,16 @@ export function DramaCard({ drama }: DramaCardProps) {
         {/* Cover */}
         <div className="relative aspect-video bg-muted overflow-hidden">
           {dramaEpisodes[0]?.imageUrl ? (
-            <img
+            <Image
               src={dramaEpisodes[0].imageUrl}
               alt={drama.title}
-              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+              fill
+              sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
+              className="object-cover group-hover:scale-105 transition-transform duration-500"
             />
           ) : (
             <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-zinc-800 to-zinc-900">
-              <span className="text-4xl">🎬</span>
+              <Film className="h-8 w-8 text-muted-foreground/50" />
             </div>
           )}
           <div className="absolute top-2 right-2">

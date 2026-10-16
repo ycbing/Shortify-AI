@@ -645,12 +645,12 @@ export default function PreviewPageContent() {
         {/* Step hint */}
         <div className="mb-6 sm:mb-8 p-3 sm:p-4 rounded-lg bg-emerald-500/5 border border-emerald-500/20">
           <p className="text-xs sm:text-sm text-emerald-400">
-            🎬 配音完成后会自动合成预览视频，也可在此手动操作
+            配音完成后会自动合成预览视频，也可在此手动操作
           </p>
         </div>
 
         <div className="mb-6 sm:mb-8">
-          <h1 className="text-xl sm:text-2xl font-bold mb-1">预览与导出 🎬</h1>
+          <h1 className="text-xl sm:text-2xl font-bold mb-1">预览与导出</h1>
           <p className="text-xs sm:text-sm text-muted-foreground">生成配音，系统将自动合成预览视频</p>
         </div>
 
@@ -789,7 +789,7 @@ export default function PreviewPageContent() {
           {/* Tabs — horizontally scrollable on mobile */}
           <TabsList className="bg-muted/30 w-full overflow-x-auto flex h-auto p-1 gap-1">
             <TabsTrigger value="preview" className="inline-flex items-center gap-1.5 shrink-0 min-h-[40px] text-xs sm:text-sm px-3 sm:px-4">📹 视频预览</TabsTrigger>
-            <TabsTrigger value="voiceover" className="inline-flex items-center gap-1.5 shrink-0 min-h-[40px] text-xs sm:text-sm px-3 sm:px-4">🎙️ 配音管理</TabsTrigger>
+            <TabsTrigger value="voiceover" className="inline-flex items-center gap-1.5 shrink-0 min-h-[40px] text-xs sm:text-sm px-3 sm:px-4">配音管理</TabsTrigger>
             <TabsTrigger value="compose" className="inline-flex items-center gap-1.5 shrink-0 min-h-[40px] text-xs sm:text-sm px-3 sm:px-4">⚙️ 高级选项</TabsTrigger>
           </TabsList>
 
@@ -921,7 +921,7 @@ export default function PreviewPageContent() {
                           : "border-border/50 bg-card/30 text-muted-foreground hover:border-border"
                       }`}
                     >
-                      🎨 AI 生图
+                      AI 生图
                     </button>
                     <button
                       onClick={() => setMaterialSource("pexels")}

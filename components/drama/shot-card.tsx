@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -204,10 +205,12 @@ export function ShotCard({
             }}
           />
         ) : imageUrl && !imgError ? (
-          <img
+          <Image
             src={imageUrl}
             alt={`镜头 ${shotNumber}`}
-            className="w-full h-full object-cover"
+            fill
+            sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+            className="object-cover"
             onError={() => setImgError(true)}
           />
         ) : (
