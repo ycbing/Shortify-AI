@@ -144,3 +144,33 @@ export function getUserActiveCount(userId: string): number {
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+// ============================================
+// Bounded concurrency pool
+// ============================================
+
+/**
+ * 有界并发执行异步任务，结果按输入顺序返回。
+ * 常驻 worker 泳道模式：任一任务抛错则整体 reject（已在途的任务会继续执行完）。
+ * 用于 IO 密集型批处理（如逐镜头提交/轮询视频生成任务）。
+ */
+export async function asyncPool<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const laneCount = Math.max(1, Math.min(concurrency, items.length));
+
+  const lanes = Array.from({ length: laneCount }, async () => {
+    while (true) {
+      const index = next++;
+      if (index >= items.length) break;
+      results[index] = await worker(items[index], index);
+    }
+  });
+
+  await Promise.all(lanes);
+  return results;
+}

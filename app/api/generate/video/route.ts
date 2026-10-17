@@ -38,7 +38,7 @@ import {
   touchGenerationTaskHeartbeat,
   updateGenerationTaskProgress,
 } from "@/lib/generation";
-import { tryAcquireUserSlot, releaseUserSlot, getUserActiveCount } from "@/lib/resilience";
+import { tryAcquireUserSlot, releaseUserSlot, getUserActiveCount, asyncPool } from "@/lib/resilience";
 import { createLogger } from "@/lib/logger";
 import { videoSchema } from "@/lib/validation";
 
@@ -344,14 +344,20 @@ async function processVideos(
       let shotsGenerated = 0;
       let shotsSkipped = 0;
 
-      for (const shot of shots) {
+      // 并发生成镜头视频（IO 密集：提交/轮询/下载；VIDEO_CONCURRENCY 默认 2）
+      const videoConcurrency = Math.max(1, Number(process.env.VIDEO_CONCURRENCY || "2"));
+      if (videoConcurrency > 1) {
+        log.info("Generating shot videos concurrently", { episodeNumber: epNum, shots: shots.length, concurrency: videoConcurrency });
+      }
+
+      const shotResults = await asyncPool(shots, videoConcurrency, async (shot) => {
         await throwIfGenerationTaskCancelled(taskId);
 
         // Skip shots that already have aiVideoUrl
         if (shot.aiVideoUrl) {
           shotsSkipped++;
           log.debug(`Shot ${shot.shotNumber} already has aiVideoUrl, skipping`, { episodeNumber: epNum });
-          continue;
+          return { status: "skipped" as const };
         }
 
         try {
@@ -359,14 +365,14 @@ async function processVideos(
         const shotImagePath = await findShotImage(dramaId, epNum, shot.shotNumber);
         if (!shotImagePath) {
           log.warn("No image found for shot, skipping", { episodeNumber: epNum, shotNumber: shot.shotNumber });
-          continue;
+          return { status: "skipped" as const };
         }
 
         // 2. Upload image to COS and get publicly accessible URL
         const publicImageUrl = await uploadShotImageAndGetPublicUrl(shotImagePath, dramaId, epNum, shot.shotNumber);
         if (!publicImageUrl) {
           log.warn("Could not get public image URL for shot, skipping", { episodeNumber: epNum, shotNumber: shot.shotNumber });
-          continue;
+          return { status: "skipped" as const };
         }
 
         // 3. Build prompt from shot data（画面描述 + 镜头语言优先，台词仅作表情参考）
@@ -448,8 +454,6 @@ async function processVideos(
           log.warn("No voiceover or audio mix failed, using video without audio", { episodeNumber: epNum, shotNumber: shot.shotNumber });
         }
 
-        shotVideoPaths.push(localVideoPath);
-
         // 7. Upload video to COS
         const cosKey = aiVideoCosKey(dramaId, epNum, shot.shotNumber);
         const cosUrl = await uploadFileToCos(localVideoPath, cosKey);
@@ -474,12 +478,22 @@ async function processVideos(
           stage: "persist",
         });
         log.info("AI video saved", { episodeNumber: epNum, shotNumber: shot.shotNumber, url: cosUrl });
+
+        return { status: "generated" as const, videoPath: localVideoPath };
         } catch (err) {
           if (err instanceof GenerationTaskCancelledError) {
             throw err;
           }
           log.error("Failed to generate video for shot", { episodeNumber: epNum, shotNumber: shot.shotNumber, error: err instanceof Error ? err.message : String(err) });
           // Continue with next shot instead of failing the whole episode
+          return { status: "failed" as const };
+        }
+      });
+
+      // 按镜头顺序聚合视频路径（concat 对文件顺序敏感）
+      for (const r of shotResults) {
+        if (r.status === "generated" && r.videoPath) {
+          shotVideoPaths.push(r.videoPath);
         }
       }
 
