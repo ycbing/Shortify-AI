@@ -16,6 +16,7 @@ import {
 } from "@/lib/ai/shot-prompts";
 import { findShotImage, mixAudioToShotVideo, tryLipSyncShotVideo } from "@/lib/ai/shot-assets";
 import { checkCredits, CREDIT_COSTS, requireCreditDeduction } from "@/lib/credits";
+import { consumeFreeVideoShots, getFreeVideoShotsRemaining } from "@/lib/free-quota";
 import {
   completeGenerationTask,
   createOrReuseGenerationTask,
@@ -103,11 +104,12 @@ export async function POST(request: NextRequest) {
           { status: 409 }
         );
       }
-      const creditCheck = await checkCredits(session.user.id, CREDIT_COSTS.video);
+      const freeRemaining = await getFreeVideoShotsRemaining(session.user.id);
+      const creditCheck = await checkCredits(session.user.id, freeRemaining > 0 ? 0 : CREDIT_COSTS.video);
       if (!creditCheck.ok) {
         return NextResponse.json(
           {
-            error: `积分不足，AI 视频生成需要 ${CREDIT_COSTS.video} 积分，当前余额 ${creditCheck.balance} 积分`,
+            error: `积分不足，AI 视频生成需要 ${CREDIT_COSTS.video} 积分（免费额度已用完），当前余额 ${creditCheck.balance} 积分`,
             code: "INSUFFICIENT_CREDITS",
           },
           { status: 402 }
@@ -337,15 +339,20 @@ async function processShotVideoRegeneration({
         .where(eq(episodes.id, episodeId));
     }
 
-    await requireCreditDeduction(
-      userId, "video", undefined, dramaId,
-      `单镜头 AI 视频 - 第${episodeNumber}集镜头${shotNumber}`
-    );
+    const freeUsed = await consumeFreeVideoShots(userId, 1);
+    const chargedCredits = freeUsed.used === 0 ? CREDIT_COSTS.video : 0;
+    if (freeUsed.used === 0) {
+      await requireCreditDeduction(
+        userId, "video", undefined, dramaId,
+        `单镜头 AI 视频 - 第${episodeNumber}集镜头${shotNumber}`
+      );
+    }
 
     await completeGenerationTask(taskId, {
       completedCount: 1,
       episodeCount: 1,
-      creditsUsed: CREDIT_COSTS.video,
+      creditsUsed: chargedCredits,
+      freeShotsUsed: freeUsed.used,
       shotNumber,
       videoUrl: cosUrl,
     });

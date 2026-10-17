@@ -22,6 +22,7 @@ import type { Shot } from "@/types/drama";
 import path from "path";
 import fs from "fs/promises";
 import { checkCredits, CREDIT_COSTS, requireCreditDeduction, refundCredits } from "@/lib/credits";
+import { consumeFreeVideoShots, getFreeVideoShotsRemaining } from "@/lib/free-quota";
 import { execSync } from "child_process";
 import { findShotImage, mixAudioToShotVideo, tryLipSyncShotVideo } from "@/lib/ai/shot-assets";
 import { buildShotVideoPrompt } from "@/lib/ai/shot-prompts";
@@ -132,14 +133,17 @@ export async function POST(request: NextRequest) {
       }, { status: 429 });
     }
 
-    // Credit check: 20 credits per shot
-    const totalVideoCredits = totalShotsNeeded * CREDIT_COSTS.video;
+    // Credit check: 每镜头 20 积分，免费额度优先抵扣
+    const freeShotsRemaining = await getFreeVideoShotsRemaining(session.user.id);
+    const freeShotsToUse = Math.min(freeShotsRemaining, totalShotsNeeded);
+    const chargeableShots = Math.max(0, totalShotsNeeded - freeShotsToUse);
+    const totalVideoCredits = chargeableShots * CREDIT_COSTS.video;
 
     const videoCreditCheck = await checkCredits(session.user.id, totalVideoCredits);
     if (!videoCreditCheck.ok) {
       return NextResponse.json(
         {
-          error: `积分不足，AI 视频生成需要 ${totalVideoCredits} 积分（${totalShotsNeeded} 个镜头 × ${CREDIT_COSTS.video} 积分），当前余额 ${videoCreditCheck.balance} 积分`,
+          error: `积分不足，AI 视频生成需要 ${totalVideoCredits} 积分（${chargeableShots} 个镜头 × ${CREDIT_COSTS.video} 积分，另含 ${freeShotsToUse} 个免费额度），当前余额 ${videoCreditCheck.balance} 积分`,
           code: "INSUFFICIENT_CREDITS",
         },
         { status: 402 }
@@ -452,9 +456,12 @@ async function processVideos(
         await throwIfGenerationTaskCancelled(taskId);
         shot.aiVideoUrl = cosUrl;
 
-        // Deduct credits per shot
-        await requireCreditDeduction(userId, "video", CREDIT_COSTS.video, dramaId, `AI 视频生成：第 ${epNum} 集 镜头 ${shot.shotNumber}`);
-        totalCreditsUsed += CREDIT_COSTS.video;
+        // Deduct credits per shot（免费额度优先消耗，扣完走积分）
+        const freeUsed = await consumeFreeVideoShots(userId, 1);
+        if (freeUsed.used === 0) {
+          await requireCreditDeduction(userId, "video", CREDIT_COSTS.video, dramaId, `AI 视频生成：第 ${epNum} 集 镜头 ${shot.shotNumber}`);
+          totalCreditsUsed += CREDIT_COSTS.video;
+        }
 
         shotsGenerated++;
         completedCount++;

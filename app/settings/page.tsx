@@ -46,6 +46,7 @@ interface CostByType {
 interface CreditInfo {
   balance: number;
   logs: UsageLog[];
+  freeVideoShots?: number;
   costEstimate?: {
     totalCNY: number;
     totalCredits: number;
@@ -192,6 +193,11 @@ export default function SettingsPage() {
                   <div>
                     <p className="text-3xl font-bold text-emerald-400">{balance}</p>
                     <p className="text-xs text-muted-foreground mt-1">剩余积分</p>
+                    {typeof creditInfo?.freeVideoShots === "number" && (
+                      <p className="text-xs text-sky-400 mt-2">
+                        AI 视频免费额度剩余 {creditInfo.freeVideoShots} 个镜头
+                      </p>
+                    )}
                   </div>
                   <Button
                     onClick={() =>

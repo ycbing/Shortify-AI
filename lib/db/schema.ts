@@ -19,6 +19,8 @@ export const users = pgTable("users", {
   email: text("email").notNull(),
   name: text("name"),
   credits: integer("credits").default(INITIAL_USER_CREDITS),
+  /** 免费 AI 视频镜头额度（新用户体验用，扣完走积分） */
+  freeVideoShots: integer("free_video_shots").default(10),
   emailVerified: timestamp("email_verified", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
